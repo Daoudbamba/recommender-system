@@ -102,6 +102,16 @@ class Recommender(ABC):
     def predict(self, user_idx: np.ndarray, item_idx: np.ndarray) -> np.ndarray:
         raise NotImplementedError(f"{self.name} ne predit pas de notes")
 
+    def score_history(self, history: sp.csr_matrix) -> np.ndarray:
+        """Scores pour des utilisateurs absents de l'entrainement (cold start).
+
+        `history` a une ligne par utilisateur et les memes colonnes que la
+        matrice d'entrainement ; ses valeurs sont les notes fournies a la volee.
+        Aucun reentrainement : seuls les modeles qui savent exploiter un
+        historique externe implementent cette methode.
+        """
+        raise NotImplementedError(f"{self.name} ne sait pas servir un utilisateur inconnu")
+
     def _check_fitted(self) -> InteractionMatrix:
         if self.matrix is None:
             raise RuntimeError(f"{self.name} : appeler fit() avant d'utiliser le modele")

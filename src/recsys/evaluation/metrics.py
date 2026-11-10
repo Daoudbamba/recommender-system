@@ -66,6 +66,21 @@ def catalog_coverage(recommended: np.ndarray, n_items: int, k: int) -> float:
     return float(len(np.unique(recommended[:, :k])) / n_items)
 
 
+def intra_list_diversity(recommended: np.ndarray, vectors: np.ndarray, k: int) -> np.ndarray:
+    """Diversite intra-liste par utilisateur : 1 - similarite cosinus moyenne entre les paires.
+
+    `vectors` a une ligne de norme 1 par film. Vaut 0 pour une liste de films
+    identiques et tend vers 1 quand les films n'ont rien en commun.
+    """
+    if k < 2:
+        raise ValueError("la diversite intra-liste demande au moins deux films")
+    items = vectors[recommended[:, :k]]
+    similarity = items @ items.transpose(0, 2, 1)
+    pairs = k * (k - 1)
+    off_diagonal = similarity.sum(axis=(1, 2)) - np.trace(similarity, axis1=1, axis2=2)
+    return 1.0 - off_diagonal / pairs
+
+
 def ranking_metrics(
     hits: np.ndarray, n_relevant: np.ndarray, ks: list[int]
 ) -> dict[str, np.ndarray]:

@@ -37,6 +37,10 @@ class PopularityRecommender(Recommender):
         self._check_fitted()
         return np.tile(self.item_scores_, (len(user_idx), 1))
 
+    def score_history(self, history: sp.csr_matrix) -> np.ndarray:
+        self._check_fitted()
+        return np.tile(self.item_scores_, (history.shape[0], 1))
+
 
 class BiasBaseline(Recommender):
     """Note estimee = moyenne globale + biais utilisateur + biais film.

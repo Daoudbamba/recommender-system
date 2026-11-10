@@ -88,11 +88,35 @@ class ContentBasedRecommender(Recommender):
 
     def score(self, user_idx: np.ndarray) -> np.ndarray:
         self._check_fitted()
-        liked = self.liked_[np.asarray(user_idx)]
+        return self._aggregate(self.liked_[np.asarray(user_idx)])
+
+    def _aggregate(self, liked: sp.csr_matrix) -> np.ndarray:
         if self.aggregation == "knn":
             return (liked @ self.similarity_.T).toarray()
-        profiles = liked @ self.item_vectors_
-        return self._dots(profiles)
+        return self._dots(liked @ self.item_vectors_)
+
+    def score_history(self, history: sp.csr_matrix) -> np.ndarray:
+        self._check_fitted()
+        liked = history.copy().tocsr()
+        liked.data = (liked.data >= self.relevance_threshold).astype(np.float32)
+        liked.eliminate_zeros()
+        return self._aggregate(liked)
+
+    def score_new_items(self, user_idx: np.ndarray, movie_ids: np.ndarray) -> np.ndarray:
+        """Scores de films absents du catalogue d'entrainement (cold start film).
+
+        Un film que le modele n'a jamais vu est rapproche, par son seul contenu, des films
+        que l'utilisateur a aimes : somme des similarites avec ses `k` plus
+        proches voisins du catalogue. Retourne (n_utilisateurs, n_films_demandes).
+        """
+        self._check_fitted()
+        new_vectors = self.features.align(np.asarray(movie_ids)).matrix
+        blocks = []
+        for start in range(0, new_vectors.shape[0], self.batch_size):
+            dots = self._dots(new_vectors[start : start + self.batch_size]).astype(np.float32)
+            blocks.append(top_k_sparse(dots, self.k))
+        neighbours = sp.vstack(blocks, format="csr")
+        return (self.liked_[np.asarray(user_idx)] @ neighbours.T).toarray()
 
     def similar_items(self, item_idx: int, n: int = 10) -> tuple[np.ndarray, np.ndarray]:
         """Les `n` films au contenu le plus proche d'un film du catalogue d'entrainement."""
