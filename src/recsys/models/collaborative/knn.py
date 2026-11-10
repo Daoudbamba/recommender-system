@@ -148,6 +148,20 @@ class ItemKNN(_NeighbourhoodModel):
         den = (self.observed_[user_idx] @ self.abs_similarity_t_).toarray()
         return num, den
 
+    def score_history(self, history: sp.csr_matrix) -> np.ndarray:
+        """Meme calcul que `score`, avec un biais utilisateur estime sur l'historique fourni."""
+        self._check_fitted()
+        coo = history.tocoo()
+        baseline = self.baseline_
+        residual = coo.data - baseline.global_mean_ - baseline.item_bias_[coo.col]
+        counts = np.bincount(coo.row, minlength=history.shape[0])
+        user_bias = np.bincount(coo.row, weights=residual, minlength=history.shape[0]) / (
+            baseline.reg_user + counts
+        )
+        residual = (residual - user_bias[coo.row]).astype(np.float32)
+        residuals = sp.csr_matrix((residual, (coo.row, coo.col)), shape=history.shape)
+        return (residuals @ self.similarity_t_).toarray()
+
     def similar_items(self, item_idx: int, n: int = 10) -> tuple[np.ndarray, np.ndarray]:
         """Les `n` films les plus proches d'un film, avec leur similarite."""
         self._check_fitted()

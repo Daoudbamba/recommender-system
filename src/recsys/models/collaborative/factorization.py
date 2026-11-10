@@ -168,6 +168,28 @@ class ImplicitALS(Recommender):
         self._check_fitted()
         return self.user_factors_[user_idx] @ self.item_factors_.T
 
+    def score_history(self, history: sp.csr_matrix) -> np.ndarray:
+        """Calcule le vecteur latent d'un nouvel utilisateur sans toucher aux films.
+
+        C'est l'etape « utilisateur » de l'ALS, appliquee a un seul utilisateur
+        avec les facteurs de films figes (Hu, Koren, Volinsky 2008) :
+        x = (YtY + Yt (C - I) Y + reg I)^-1 Yt C p, ou C vaut `alpha` sur les
+        films aimes et 1 ailleurs.
+        """
+        self._check_fitted()
+        items = self.item_factors_.astype(np.float64)
+        gram = items.T @ items + self.reg * np.eye(items.shape[1])
+        users = np.zeros((history.shape[0], items.shape[1]))
+        for row in range(history.shape[0]):
+            lo, hi = history.indptr[row], history.indptr[row + 1]
+            liked = history.indices[lo:hi][history.data[lo:hi] >= self.relevance_threshold]
+            if len(liked) == 0:
+                continue
+            factors = items[liked]
+            system = gram + (self.alpha - 1.0) * factors.T @ factors
+            users[row] = np.linalg.solve(system, self.alpha * factors.sum(axis=0))
+        return (users @ items.T).astype(np.float32)
+
     def similar_items(self, item_idx: int, n: int = 10) -> tuple[np.ndarray, np.ndarray]:
         """Films les plus proches dans l'espace latent (similarite cosinus)."""
         self._check_fitted()
