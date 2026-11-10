@@ -81,3 +81,31 @@ content:
     embeddings:
       - {aggregation: centroid}
       - {aggregation: knn}
+
+hybrid:
+  # Composants : meilleure configuration de chaque modele, reprise des sprints 2 et 3.
+  components:
+    als_implicit: collaborative
+    item_knn: collaborative
+    tfidf: content
+    embeddings: content
+  strategies: [weighted, zscore, rrf]
+  # Combinaisons de poids evaluees sur la validation pour chaque strategie.
+  # Justification : l'ALS implicite est le meilleur modele seul, le TF-IDF apporte un signal
+  # independant des notes, l'item-kNN la couverture, les embeddings sont testes en appoint.
+  weight_sets:
+    - {als_implicit: 1, item_knn: 1, tfidf: 1, embeddings: 1}
+    - {als_implicit: 1, tfidf: 1}
+    - {als_implicit: 2, tfidf: 1}
+    - {als_implicit: 1, item_knn: 1, tfidf: 1}
+    - {als_implicit: 2, item_knn: 1, tfidf: 1}
+    - {als_implicit: 2, item_knn: 1, tfidf: 2}
+    - {als_implicit: 3, item_knn: 1, tfidf: 2, embeddings: 1}
+  rrf_k: 60
+  diversity_pool: 50                          # candidats re-classes par utilisateur
+  diversity_lambdas: [1.0, 0.9, 0.7, 0.5, 0.3]  # 1.0 = pas de diversification
+  popularity_penalties: [0.0, 0.1, 0.2, 0.4]
+  cold_start_users: 2000                      # nouveaux utilisateurs echantillonnes
+  cold_start_history_sizes: [0, 1, 3, 5, 10]  # notes revelees au modele
+  # Poids de la popularite = prior / (prior + n) ; le prior est choisi sur la validation.
+  cold_start_priors: [0.25, 0.5, 1.0, 3.0]

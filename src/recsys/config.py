@@ -96,6 +96,22 @@ class ContentConfig(BaseModel):
     grids: dict[str, list[dict[str, Any]]] = {}
 
 
+class HybridConfig(BaseModel):
+    """Systeme hybride : composants, combinaisons de poids, cold start, diversite."""
+
+    # Nom du composant -> experience qui l'a selectionne ("collaborative" ou "content").
+    components: dict[str, str] = {}
+    strategies: list[str] = ["weighted", "zscore", "rrf"]
+    weight_sets: list[dict[str, float]] = []
+    rrf_k: int = Field(default=60, ge=1)
+    diversity_pool: int = Field(default=50, ge=2)
+    diversity_lambdas: list[float] = [1.0, 0.9, 0.8, 0.7, 0.5]
+    popularity_penalties: list[float] = [0.0, 0.1, 0.2, 0.4]
+    cold_start_users: int = Field(default=2000, ge=1)
+    cold_start_history_sizes: list[int] = [0, 1, 3, 5, 10]
+    cold_start_priors: list[float] = [0.5, 1.0, 3.0]
+
+
 class Config(BaseModel):
     project: ProjectConfig = ProjectConfig()
     dataset: DatasetConfig
@@ -106,6 +122,7 @@ class Config(BaseModel):
     # Grilles d'hyperparametres : nom du modele -> liste de configurations.
     collaborative: dict[str, list[dict[str, Any]]] = {}
     content: ContentConfig = ContentConfig()
+    hybrid: HybridConfig = HybridConfig()
 
     @property
     def raw_dataset_dir(self) -> Path:
