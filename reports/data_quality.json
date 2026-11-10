@@ -1,0 +1,97 @@
+{
+  "tables": {
+    "ratings": {
+      "n_rows": 25000095,
+      "n_columns": 4,
+      "missing": {
+        "userId": 0,
+        "movieId": 0,
+        "rating": 0,
+        "timestamp": 0
+      },
+      "duplicate_rows": 0,
+      "key": [
+        "userId",
+        "movieId"
+      ],
+      "duplicate_keys": 0
+    },
+    "movies": {
+      "n_rows": 62423,
+      "n_columns": 3,
+      "missing": {
+        "movieId": 0,
+        "title": 0,
+        "genres": 0
+      },
+      "duplicate_rows": 0,
+      "key": [
+        "movieId"
+      ],
+      "duplicate_keys": 0
+    },
+    "tags": {
+      "n_rows": 1093360,
+      "n_columns": 4,
+      "missing": {
+        "userId": 0,
+        "movieId": 0,
+        "tag": 16,
+        "timestamp": 0
+      },
+      "duplicate_rows": 0,
+      "key": [
+        "userId",
+        "movieId",
+        "tag"
+      ],
+      "duplicate_keys": 0
+    },
+    "links": {
+      "n_rows": 62423,
+      "n_columns": 3,
+      "missing": {
+        "movieId": 0,
+        "imdbId": 0,
+        "tmdbId": 107
+      },
+      "duplicate_rows": 0,
+      "key": [
+        "movieId"
+      ],
+      "duplicate_keys": 0
+    }
+  },
+  "ratings": {
+    "out_of_range": 0,
+    "not_half_star": 0,
+    "distinct_values": [
+      0.5,
+      1.0,
+      1.5,
+      2.0,
+      2.5,
+      3.0,
+      3.5,
+      4.0,
+      4.5,
+      5.0
+    ],
+    "non_positive_timestamps": 0,
+    "first_rating": "1995-01-09T11:46:49+00:00",
+    "last_rating": "2019-11-21T09:15:03+00:00"
+  },
+  "movies": {
+    "no_genres_listed": 5062,
+    "titles_without_year": 412,
+    "duplicate_titles": 98
+  },
+  "integrity": {
+    "rated_movies_missing_from_catalog": 0,
+    "tagged_movies_missing_from_catalog": 0,
+    "linked_movies_missing_from_catalog": 0,
+    "catalog_movies_without_rating": 3376,
+    "catalog_movies_without_tag": 17172,
+    "catalog_movies_without_link": 0
+  }
+}

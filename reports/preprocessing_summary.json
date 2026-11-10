@@ -1,0 +1,55 @@
+{
+  "ratings": {
+    "raw": {
+      "n_rows": 25000095,
+      "n_users": 162541,
+      "n_movies": 59047
+    },
+    "clean": {
+      "n_rows": 25000095,
+      "n_users": 162541,
+      "n_movies": 59047
+    }
+  },
+  "movies": {
+    "raw": {
+      "n_rows": 62423,
+      "n_movies": 62423
+    },
+    "clean": {
+      "n_rows": 62423,
+      "n_movies": 62423
+    }
+  },
+  "tags": {
+    "raw": {
+      "n_rows": 1093360,
+      "n_users": 14592,
+      "n_movies": 45251
+    },
+    "clean": {
+      "n_rows": 1093333,
+      "n_users": 14591,
+      "n_movies": 45251
+    }
+  },
+  "links": {
+    "raw": {
+      "n_rows": 62423,
+      "n_movies": 62423
+    },
+    "clean": {
+      "n_rows": 62423,
+      "n_movies": 62423
+    }
+  },
+  "interactions": {
+    "n_rows": 24808109,
+    "n_users": 162414,
+    "n_movies": 18424
+  },
+  "thresholds": {
+    "min_user_ratings": 20,
+    "min_movie_ratings": 20
+  }
+}
