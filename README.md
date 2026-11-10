@@ -4,14 +4,14 @@ Système de recommandation de films pour une plateforme de streaming fictive, co
 MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle hybride et
 *learning to rank*, exposés par une API et un dashboard.
 
-> **État d'avancement : Sprint 1 terminé (données).** Les sections marquées *à venir* décrivent
-> ce qui est prévu, pas ce qui existe. Aucun résultat de modèle n'est encore publié ici, parce
-> qu'aucun modèle n'a encore été entraîné.
+> **État d'avancement : Sprints 1 et 2 terminés (données, filtrage collaboratif).** Les sections
+> marquées *à venir* décrivent ce qui est prévu, pas ce qui existe. Tous les scores publiés ici
+> sortent de `reports/collaborative_results.json`, écrit par l'expérience réellement exécutée.
 
 | Sprint | Contenu | État |
 |---|---|---|
 | 1 | Initialisation, téléchargement vérifié, exploration, nettoyage, rapport | ✅ fait |
-| 2 | Filtrage collaboratif (user-based, item-based, factorisation) | à venir |
+| 2 | Filtrage collaboratif (user-based, item-based, factorisation), protocole d'évaluation | ✅ fait |
 | 3 | Filtrage par contenu (TF-IDF) et embeddings | à venir |
 | 4 | Système hybride, cold start, diversité | à venir |
 | 5 | Learning to rank (XGBoost) | à venir |
@@ -36,10 +36,18 @@ flowchart LR
         D --> E[(data/processed<br/>Parquet)]
         E --> F[Rapport de données<br/>et notebooks]
     end
-    subgraph S2["Sprints 2 à 7 — à venir"]
-        E --> G[Features]
-        G --> H[Modèles : collaboratif,<br/>contenu, embeddings,<br/>hybride, ranking]
-        H --> I[(artifacts + MLflow)]
+    subgraph S2["Sprint 2 — en place"]
+        E --> S[Séparation temporelle<br/>entraînement / validation / test]
+        S --> M[Modèles collaboratifs :<br/>kNN, ALS explicite, ALS implicite]
+        M --> V[Évaluation Top-K<br/>et prédiction de note]
+        M --> AR[(artifacts/collaborative)]
+        V --> R2[Rapport de résultats]
+    end
+    subgraph S3["Sprints 3 à 7 — à venir"]
+        E --> G[Features de contenu]
+        G --> H[Contenu, embeddings,<br/>hybride, ranking]
+        AR --> H
+        H --> I[(MLflow)]
         I --> J[API FastAPI]
         J --> K[Dashboard Streamlit]
     end
@@ -54,17 +62,20 @@ recommender-system/
 ├── configs/config.yaml        configuration centrale (dataset, chemins, seuils, graine)
 ├── data/                      raw / processed / features — jamais versionné
 ├── docs/DATASET.md            provenance et conditions d'utilisation
-├── notebooks/                 01 exploration, 02 prétraitement (exécutés, sorties incluses)
-├── reports/                   rapport de données généré + figures
+├── notebooks/                 01 exploration, 02 prétraitement, 04 filtrage collaboratif
+├── reports/                   rapports générés (données, modèles) + figures + résultats JSON
 ├── scripts/                   points d'entrée en ligne de commande
 ├── src/recsys/
 │   ├── config.py              chargement et validation Pydantic de la configuration
 │   ├── data/                  téléchargement vérifié, schémas, chargement, contrôles qualité
 │   ├── preprocessing/         nettoyage (fonctions pures) et pipeline
-│   ├── analysis/              statistiques, graphiques, génération du rapport
+│   ├── analysis/              statistiques, graphiques, génération des rapports
+│   ├── evaluation/            séparation temporelle, métriques, protocole
+│   ├── models/                contrat commun + modèles collaboratifs
+│   ├── experiments/           entraînement, sélection sur validation, mesure sur test
 │   ├── utils/                 journalisation, graines aléatoires
-│   └── features/ models/ evaluation/     vides pour l'instant (sprints 2 à 5)
-└── tests/                     37 tests Pytest
+│   └── features/              vide pour l'instant (Sprint 3)
+└── tests/                     91 tests Pytest
 ```
 
 ## Technologies
@@ -72,13 +83,15 @@ recommender-system/
 Seules les bibliothèques réellement utilisées par le code existant sont installées ; les autres
 arriveront avec le sprint qui en a besoin.
 
-| Outil | Rôle au Sprint 1 |
+| Outil | Rôle |
 |---|---|
 | Python 3.11 | Version cible |
 | Pandas 3, NumPy 2 | Chargement, nettoyage, statistiques |
 | PyArrow / Parquet | Stockage intermédiaire typé et compact |
 | Pydantic, PyYAML | Configuration validée |
-| Matplotlib | Figures du rapport et des notebooks |
+| SciPy (matrices creuses) | Matrice utilisateur × film, similarités, kNN |
+| implicit | ALS pour retours implicites |
+| Matplotlib | Figures des rapports et des notebooks |
 | Pytest, Ruff | Tests et qualité du code |
 | Jupyter | Notebooks d'exploration |
 
@@ -151,6 +164,91 @@ Le seuil de 20 écarte 69 % des films notés pour moins de 1 % des notes : ces f
 presque aucun signal collaboratif. Ils restent dans `movies.parquet` et relèveront des approches
 par contenu (cold start film). Le seuil se règle dans `configs/config.yaml`.
 
+## Filtrage collaboratif (Sprint 2)
+
+Rapport complet généré : [reports/collaborative_report.md](reports/collaborative_report.md).
+Démonstration commentée : [notebooks/04_collaborative_filtering.ipynb](notebooks/04_collaborative_filtering.ipynb).
+
+### Méthodologie d'évaluation
+
+Le protocole imite la production : on apprend sur le passé, on recommande pour le futur.
+
+| Jeu | Notes d'entraînement | Période évaluée | Utilisateurs évalués |
+|---|---|---|---|
+| Validation (choix des hyperparamètres) | 19,9 M, jusqu'au 25 juin 2016 | jusqu'au 4 janvier 2018 | 5 006 |
+| Test (mesure finale) | 22,4 M, jusqu'au 4 janvier 2018 | jusqu'au 21 novembre 2019 | 6 206 |
+
+- **Aucune fuite** : rien de postérieur à la coupure n'entre dans l'entraînement, y compris pour
+  décider quels films ont assez de notes. Le test ne sert jamais à choisir un hyperparamètre.
+- **Film pertinent** : note ≥ 4. Une absence de note n'est jamais traitée comme un avis négatif
+  à l'entraînement.
+- **Candidats** : tous les films du catalogue d'entraînement que l'utilisateur n'a pas encore notés
+  (16 007 films), sans échantillonnage de négatifs.
+- **Métriques** : Precision, Recall, F1, MAP et NDCG à 5, 10 et 20 ; couverture du catalogue ;
+  RMSE et MAE pour les modèles qui prédisent une note.
+
+Deux limites à garder en tête en lisant les scores :
+
+- un film recommandé que l'utilisateur n'a jamais noté compte comme une erreur, même s'il lui
+  aurait plu. Les valeurs absolues sont donc des bornes basses ; ce sont les écarts entre modèles
+  qui s'interprètent ;
+- les utilisateurs évalués sont ceux qui reviennent après la coupure, donc de gros utilisateurs
+  (historique médian de 275 notes). Les 11 950 utilisateurs apparus pendant la période de test
+  n'ont aucun historique : ils relèvent du cold start (Sprint 4).
+
+### Modèles
+
+| Modèle | Principe | Sortie |
+|---|---|---|
+| Popularité | Films ayant reçu le plus de notes ≥ 4 | classement |
+| Biais | Moyenne globale + biais utilisateur + biais film, amortis | note et classement |
+| Item-kNN | Similarité cosinus entre films sur les résidus du modèle de biais, 50 voisins | note et classement |
+| User-kNN | Même principe entre utilisateurs, 200 voisins cherchés à la demande | note et classement |
+| ALS explicite | Factorisation des résidus sur les notes observées (implémentation NumPy du projet) | note et classement |
+| ALS implicite | Factorisation du signal binaire « a aimé » (bibliothèque `implicit`) | classement |
+
+### Résultats sur le test
+
+| Modèle | Precision@10 | Recall@10 | MAP@10 | NDCG@10 | Couverture@10 | RMSE | MAE |
+|---|---|---|---|---|---|---|---|
+| Popularité | 0,0654 | 0,0319 | 0,0406 | 0,0786 | 1,9 % | — | — |
+| Biais | 0,0463 | 0,0278 | 0,0264 | 0,0559 | 0,6 % | 0,8710 | 0,6461 |
+| Item-kNN | 0,0881 | 0,0414 | 0,0551 | 0,1029 | **24,4 %** | 0,8681 | 0,6324 |
+| User-kNN | 0,0816 | 0,0363 | 0,0510 | 0,0953 | 11,6 % | 0,8976 | 0,6633 |
+| ALS explicite | 0,0322 | 0,0221 | 0,0170 | 0,0376 | 17,1 % | **0,8263** | **0,6040** |
+| ALS implicite | **0,1202** | **0,0597** | **0,0747** | **0,1381** | 12,6 % | — | — |
+
+![Recall@k sur le test](reports/figures/cf_recall_by_k.png)
+
+### Ce qu'il faut en retenir
+
+1. **L'ALS implicite est le meilleur pour recommander** : NDCG@10 de 0,138 contre 0,079 pour la
+   popularité, soit 76 % de mieux. En moyenne, 12 % de ses dix recommandations sont des films
+   que l'utilisateur a réellement aimés ensuite.
+2. **Bien prédire une note n'est pas bien recommander.** L'ALS explicite a la meilleure RMSE
+   (0,826) mais le plus mauvais classement, sous la popularité. Il apprend à estimer la note des
+   films qu'un utilisateur choisit de noter, pas à deviner lesquels il choisira. C'est la raison
+   pour laquelle le projet évalue les deux familles de métriques séparément.
+3. **L'item-kNN offre le meilleur compromis pertinence / diversité** : 31 % de mieux que la
+   popularité en NDCG@10, tout en recommandant 24 % du catalogue contre 2 %. Il est en plus
+   explicable (« parce que vous avez aimé… ») et se sert en 1,7 ms par utilisateur.
+4. **Le user-kNN est le plus coûteux à servir** : 45 ms par utilisateur, 26 fois plus que
+   l'item-kNN, pour un résultat inférieur. Sa RMSE (0,898) est même moins bonne que celle du
+   simple modèle de biais (0,871) : en l'état, il n'apporte rien à la prédiction de note.
+5. **Les gros historiques sont les plus difficiles.** Le NDCG@10 de l'ALS implicite passe de 0,166
+   pour les utilisateurs de 5 à 50 notes à 0,120 pour ceux de 401 à 1 000 notes.
+6. **Biais de popularité mesuré.** Les films du top-10 de l'ALS implicite ont en moyenne 20 400
+   notes d'entraînement, contre 12 100 pour l'item-kNN. La diversité sera traitée au Sprint 4.
+
+### Limites de ce sprint
+
+- Grilles d'hyperparamètres volontairement petites (2 ou 3 configurations par modèle) : le
+  user-kNN prend 7 minutes par évaluation et l'ALS explicite 7 à 12 minutes par entraînement.
+- Un seul découpage temporel et une seule graine : pas d'intervalle de confiance sur les écarts.
+- Les modèles sauvegardés sont entraînés jusqu'au 4 janvier 2018 (la période de test est exclue).
+  Un réentraînement sur toutes les données est prévu avant la mise en service (Sprint 6).
+- Aucun modèle de ce sprint ne sait répondre à un utilisateur ou un film inconnu.
+
 ## Installation
 
 Prérequis : Python 3.11, environ 2 Go d'espace disque pour les données.
@@ -193,10 +291,24 @@ python scripts/build_data_report.py
 Régénère `reports/data_report.md` et ses figures.
 
 ```bash
+python scripts/train_collaborative.py
+```
+
+Entraîne, sélectionne sur la validation et mesure sur le test les six modèles collaboratifs
+(environ une heure sur un portable 8 cœurs / 16 Go). Ajouter `--sample-users 5000` pour un essai
+de moins d'une minute, dont les résultats sont écrits à part dans `reports/sample/`.
+
+```bash
+python scripts/build_model_report.py
+```
+
+Régénère `reports/collaborative_report.md` à partir des résultats.
+
+```bash
 jupyter lab notebooks
 ```
 
-Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make test`, `make lint`.
+Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make test`, `make lint`.
 
 ## Tests
 
@@ -208,12 +320,21 @@ python -m pytest
 python -m ruff check .
 ```
 
-Les 37 tests tournent en quelques secondes sur des jeux miniatures au format MovieLens, sans
-avoir besoin du dataset réel. Ils couvrent : la validation de la configuration, le
-téléchargement (somme de contrôle, archive corrompue, refus d'une archive qui écrirait hors
-du dossier cible), la détection d'un schéma inattendu, les contrôles qualité, chaque règle de
-nettoyage, le filtrage itératif, les statistiques, et le pipeline de bout en bout jusqu'au
-rapport.
+Les 91 tests tournent en quelques secondes sur des jeux miniatures, sans avoir besoin du
+dataset réel. Ils couvrent :
+
+- **données** : configuration, téléchargement (somme de contrôle, archive corrompue, refus d'une
+  archive qui écrirait hors du dossier cible), schéma inattendu, contrôles qualité, règles de
+  nettoyage, pipeline jusqu'au rapport ;
+- **évaluation** : chaque métrique sur un cas calculé à la main, absence de fuite dans la
+  séparation temporelle (y compris pour le filtre de popularité des films), protocole vérifié
+  avec un modèle « oracle » et un modèle « pire cas » ;
+- **modèles** : sur un jeu à deux communautés, chaque modèle personnalisé doit recommander le
+  film manquant du bon genre ; exclusion des films déjà notés ; repli sur le modèle de biais
+  sans voisin ; décroissance de l'erreur de l'ALS ; reproductibilité à graine fixée ;
+  sauvegarde et rechargement à l'identique ;
+- **expérience** : exécution de bout en bout et vérification que l'hyperparamètre retenu est bien
+  celui de la validation.
 
 ## Reproductibilité
 
@@ -225,7 +346,8 @@ rapport.
 
 ## Limites actuelles
 
-- Aucun modèle, aucune API, aucun dashboard à ce stade.
+- Pas encore d'approche par contenu, d'API ni de dashboard ; les modèles collaboratifs ne
+  traitent pas le cold start.
 - MovieLens ne fournit ni description de film ni données de visionnage : les « habitudes de
   visionnage » se limiteront aux notes et à leur horodatage.
 - Les notes s'arrêtent en 2019 et proviennent d'utilisateurs ayant noté au moins 20 films :
