@@ -4,8 +4,8 @@ Système de recommandation de films pour une plateforme de streaming fictive, co
 MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle hybride et
 *learning to rank*, exposés par une API et un dashboard.
 
-> **État d'avancement : Sprints 1 à 3 terminés (données, filtrage collaboratif, contenu et
-> embeddings).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
+> **État d'avancement : Sprints 1 à 4 terminés (données, filtrage collaboratif, contenu et
+> embeddings, système hybride).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
 > Tous les scores publiés ici sortent des fichiers `reports/*_results.json`, écrits par les
 > expériences réellement exécutées.
 
@@ -14,7 +14,7 @@ MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle
 | 1 | Initialisation, téléchargement vérifié, exploration, nettoyage, rapport | ✅ fait |
 | 2 | Filtrage collaboratif (user-based, item-based, factorisation), protocole d'évaluation | ✅ fait |
 | 3 | Filtrage par contenu (TF-IDF), embeddings, moteur de films similaires | ✅ fait |
-| 4 | Système hybride, cold start, diversité | à venir |
+| 4 | Système hybride, cold start, diversité | ✅ fait |
 | 5 | Learning to rank (XGBoost) | à venir |
 | 6 | API FastAPI et dashboard Streamlit | à venir |
 | 7 | MLflow, Docker, CI, documentation finale | à venir |
@@ -53,9 +53,15 @@ flowchart LR
         EM --> IX[(Index de similarité<br/>62 423 films)]
         CB --> V
     end
-    subgraph S4["Sprints 4 à 7 — à venir"]
-        AR --> H[Hybride, ranking]
-        CB --> H
+    subgraph S4["Sprint 4 — en place"]
+        AR --> HY[Hybride :<br/>agrégation de rangs]
+        CB --> HY
+        HY --> RR[Re-classement :<br/>diversité, popularité]
+        HY --> CS[Cold start :<br/>utilisateur, film]
+        HY --> V
+    end
+    subgraph S5["Sprints 5 à 7 — à venir"]
+        HY --> H[Ranking XGBoost]
         H --> I[(MLflow)]
         I --> J[API FastAPI]
         J --> K[Dashboard Streamlit]
@@ -71,7 +77,7 @@ recommender-system/
 ├── configs/config.yaml        configuration centrale (dataset, chemins, seuils, graine)
 ├── data/                      raw / processed / features — jamais versionné
 ├── docs/DATASET.md            provenance et conditions d'utilisation
-├── notebooks/                 01 à 06 : exploration, prétraitement, features, collaboratif, contenu, embeddings
+├── notebooks/                 01 à 07 : exploration, prétraitement, features, collaboratif, contenu, embeddings, hybride
 ├── reports/                   rapports générés (données, modèles) + figures + résultats JSON
 ├── scripts/                   points d'entrée en ligne de commande
 ├── src/recsys/
@@ -81,10 +87,10 @@ recommender-system/
 │   ├── analysis/              statistiques, graphiques, génération des rapports
 │   ├── evaluation/            séparation temporelle, métriques, protocole
 │   ├── features/              documents de films, TF-IDF par champ, embeddings avec cache
-│   ├── models/                contrat commun, modèles collaboratifs, modèle par contenu, index
+│   ├── models/                contrat commun, collaboratif, contenu, hybride, re-classement, cold start
 │   ├── experiments/           entraînement, sélection sur validation, mesure sur test
 │   └── utils/                 journalisation, graines aléatoires
-└── tests/                     117 tests Pytest
+└── tests/                     142 tests Pytest
 ```
 
 ## Technologies
@@ -351,6 +357,124 @@ perceptible ; le choix serait à revoir au-delà du million de vecteurs.
   et sur deux mesures indirectes (accord avec le collaboratif, cohérence de genres).
 - Un film sans tag ni genre (0,07 % des films évaluables, 4,7 % du catalogue) n'a que son titre.
 
+## Système hybride, diversité et cold start (Sprint 4)
+
+Rapport complet généré : [reports/hybrid_report.md](reports/hybrid_report.md).
+Démonstration commentée : [notebooks/07_hybrid_recommendation.ipynb](notebooks/07_hybrid_recommendation.ipynb).
+
+### Combiner les modèles
+
+Les composants sont la meilleure configuration de chaque modèle des sprints 2 et 3. Leurs scores
+ne sont pas comparables (somme de similarités, produit de facteurs latents…) : trois stratégies
+les ramènent sur une échelle commune avant la somme pondérée.
+
+| Stratégie | Normalisation par utilisateur | NDCG@10 (validation) | NDCG@10 (test) |
+|---|---|---|---|
+| Pondérée | min-max, scores dans [0, 1] | 0,1696 | 0,1506 |
+| Scores centrés-réduits | moyenne 0, écart-type 1 | 0,1669 | 0,1479 |
+| **Agrégation de rangs (RRF)** | 1 / (60 + rang), les scores sont ignorés | **0,1699** | **0,1527** |
+
+Chaque stratégie a été essayée avec sept combinaisons de poids. La combinaison retenue, sur la
+validation, est la même pour les trois : **ALS implicite 0,50, item-kNN 0,25, TF-IDF 0,25**.
+Justification mesurée : l'ALS implicite est le meilleur modèle seul et reçoit le plus gros
+poids ; le TF-IDF apporte un signal indépendant des notes ; l'item-kNN élargit la couverture.
+Ajouter les embeddings n'améliore aucune stratégie (0,164 contre 0,170 en RRF).
+
+### Résultats sur le test
+
+| Modèle | Precision@10 | Recall@10 | MAP@10 | NDCG@10 | Couverture@10 |
+|---|---|---|---|---|---|
+| Popularité | 0,0654 | 0,0319 | 0,0406 | 0,0786 | 1,9 % |
+| Item-kNN | 0,0881 | 0,0414 | 0,0551 | 0,1029 | 24,4 % |
+| Contenu TF-IDF | 0,0890 | 0,0529 | 0,0572 | 0,1113 | 20,9 % |
+| ALS implicite | 0,1202 | 0,0597 | 0,0747 | 0,1381 | 12,6 % |
+| **Hybride RRF** | **0,1313** | **0,0674** | **0,0855** | **0,1527** | 15,8 % |
+
+L'hybride dépasse le meilleur modèle seul de 11 % en NDCG@10 et de 13 % en rappel, tout en
+recommandant une part plus large du catalogue (15,8 % contre 12,6 %). Il double presque la
+popularité (+94 %).
+
+### Diversité et biais de popularité
+
+Le re-classement part des 50 meilleurs candidats de l'hybride. Deux leviers, mesurés sur le test
+sans qu'aucun réglage n'y soit sélectionné :
+
+| Réglage | NDCG@10 | Diversité intra-liste | Couverture@10 | Popularité moyenne du top-10 |
+|---|---|---|---|---|
+| Hybride seul | 0,1527 | 0,548 | 15,8 % | 19 277 notes |
+| MMR, λ = 0,7 | 0,1522 | 0,559 | 16,0 % | 19 325 |
+| MMR, λ = 0,5 | 0,1510 | 0,572 | 16,3 % | 19 242 |
+| MMR, λ = 0,3 | 0,1457 | 0,602 | 16,9 % | 18 793 |
+| Pénalité de popularité 0,2 | 0,1543 | 0,548 | 16,7 % | 18 901 |
+| Pénalité de popularité 0,4 | 0,1558 | 0,547 | 17,8 % | 18 395 |
+
+- **MMR** (Maximal Marginal Relevance) pénalise la ressemblance avec les films déjà placés,
+  mesurée dans l'espace des embeddings. Jusqu'à λ = 0,5, la diversité monte pour une perte de
+  pertinence de 1 % ; en dessous, la pertinence décroche. L'effet reste modeste : l'hybride
+  produit déjà des listes variées.
+- **La pénalité de popularité** fait mieux que prévu : elle élargit la couverture *et* améliore
+  légèrement la pertinence (0,1558 contre 0,1527). Résultat à confirmer, puisqu'il est observé
+  sur le test et non choisi sur la validation.
+
+### Cold start utilisateur
+
+Les 11 950 utilisateurs apparus après la coupure n'existent pas pour les modèles. On rejoue
+l'arrivée de 2 000 d'entre eux en révélant leurs premières notes dans l'ordre chronologique.
+Aucun réentraînement : chaque modèle calcule un score à partir des notes fournies à la volée
+(pour l'ALS, résolution du vecteur latent de l'utilisateur à films fixés). La cible est la même
+dans toutes les colonnes : les films aimés après les dix premières notes. NDCG@10 :
+
+| Modèle | 0 note | 1 note | 3 notes | 5 notes | 10 notes |
+|---|---|---|---|---|---|
+| Popularité | **0,238** | 0,238 | 0,238 | 0,238 | 0,238 |
+| Contenu TF-IDF | 0,040 | 0,156 | 0,194 | 0,218 | 0,254 |
+| ALS implicite | 0,040 | 0,217 | 0,261 | 0,286 | 0,326 |
+| Item-kNN | 0,040 | 0,201 | 0,261 | 0,293 | 0,334 |
+| Hybride RRF | 0,048 | 0,232 | 0,285 | **0,320** | 0,369 |
+| **Stratégie cold start** | **0,238** | **0,248** | **0,288** | 0,319 | **0,370** |
+
+![Cold start utilisateur](reports/figures/hybrid_cold_users.png)
+
+La **stratégie cold start** mélange l'hybride et la popularité, avec un poids de popularité de
+`prior / (prior + nombre de notes)` : popularité pure sans historique, puis personnalisation
+croissante. Elle égale ou dépasse le meilleur modèle à chaque étape.
+
+- **Une seule note ne suffit pas** : avec une note, aucun modèle personnalisé ne bat la
+  popularité. Il en faut trois pour que la personnalisation paie nettement (+21 %).
+- **Dix notes changent tout** : la stratégie atteint 0,370, soit 55 % de mieux que la popularité.
+- **Deux réglages corrigés en cours de sprint.** La première version mélangeait des scores
+  bruts et utilisait un prior fixé a priori à 3 : elle restait sous l'hybride dès trois notes et
+  recommandait surtout des succès généralistes. Le mélange se fait maintenant sur les rangs, et
+  le prior (0,5) est choisi sur les nouveaux venus de la validation.
+
+### Cold start film
+
+Un film sans notes suffisantes ne peut pas être recommandé par un modèle collaboratif. Parmi les
+26 470 films absents du catalogue d'entraînement (moins de 20 notes avant la coupure, films
+sortis ensuite compris), le contenu seul retrouve une partie de ceux que 3 837 utilisateurs ont
+aimés :
+
+| Modèle | Recall@10 | NDCG@10 |
+|---|---|---|
+| Hasard | 0,0003 | 0,0005 |
+| Contenu embeddings | 0,0213 | 0,0244 |
+| Contenu TF-IDF | 0,0312 | 0,0378 |
+
+Le TF-IDF fait cent fois mieux que le hasard, mais le niveau absolu reste faible : un film tout
+juste ajouté n'a pas encore de tags, et son contenu se réduit à son titre et à ses genres.
+
+### Limites de ce sprint
+
+- Les poids de l'hybride sont choisis parmi sept combinaisons fixées à l'avance, pas optimisés
+  en continu. Le Sprint 5 apprendra cette combinaison avec un modèle de ranking.
+- L'écart entre les trois stratégies est faible (0,148 à 0,153) et mesuré sur un seul découpage :
+  il ne permet pas d'affirmer que l'agrégation de rangs est intrinsèquement meilleure.
+- Le niveau de diversité et la pénalité de popularité sont décrits, pas tranchés : c'est une
+  décision produit que seule une expérience en ligne peut arbitrer.
+- Le cold start est simulé sur des utilisateurs réels de 2018-2019 qui ont tous fini par noter
+  au moins 20 films. De vrais visiteurs d'un soir se comporteraient autrement.
+- Servir l'hybride demande quatre modèles en mémoire (environ 1,5 Go d'artefacts).
+
 ## Installation
 
 Prérequis : Python 3.11, environ 2 Go d'espace disque pour les données.
@@ -409,17 +533,25 @@ fois, dont 20 d'encodage ; les embeddings sont ensuite relus depuis le cache). L
 lancement télécharge le modèle `all-MiniLM-L6-v2` (90 Mo) depuis Hugging Face.
 
 ```bash
+python scripts/train_hybrid.py
+```
+
+Règle les stratégies hybrides sur la validation, mesure le test, puis évalue le re-classement et
+le cold start (environ 20 minutes). Prérequis : les deux expériences précédentes, dont les
+résultats fournissent les hyperparamètres des composants.
+
+```bash
 python scripts/build_model_report.py
 ```
 
-Régénère `reports/collaborative_report.md` et `reports/content_report.md` à partir des
-résultats.
+Régénère les trois rapports (`collaborative_report.md`, `content_report.md`,
+`hybrid_report.md`) à partir des résultats.
 
 ```bash
 jupyter lab notebooks
 ```
 
-Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make test`, `make lint`.
+Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make train-hybrid`, `make test`, `make lint`.
 
 ## Tests
 
@@ -431,7 +563,7 @@ python -m pytest
 python -m ruff check .
 ```
 
-Les 117 tests tournent en une dizaine de secondes sur des jeux miniatures, sans avoir besoin
+Les 142 tests tournent en une vingtaine de secondes sur des jeux miniatures, sans avoir besoin
 du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
 
 - **données** : configuration, téléchargement (somme de contrôle, archive corrompue, refus d'une
@@ -447,6 +579,14 @@ du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
 - **contenu** : agrégation des tags par utilisateurs distincts, exclusion des tags postérieurs à
   la coupure, pondération des champs TF-IDF, cache d'embeddings qui n'encode que les textes
   nouveaux, moteur de similarité (film inconnu, dimension incompatible, requête vide) ;
+- **hybride** : chaque normalisation sur un cas calculé à la main, différence de comportement
+  entre somme pondérée et agrégation de rangs, composant de poids nul jamais appelé, décomposition
+  du score par modèle, recette sauvegardée en quelques octets ;
+- **diversité** : MMR à λ = 1 identique au classement d'origine, quasi-doublon écarté quand la
+  diversité compte, films déjà vus jamais réintroduits par le re-classement ;
+- **cold start** : même cible pour toutes les tailles d'historique, films révélés exclus des
+  candidats, utilisateur inconnu servi à partir de quelques notes, « fold-in » de l'ALS cohérent
+  avec le vecteur appris, cas sans aucun utilisateur exploitable ;
 - **expériences** : exécution de bout en bout et vérification que l'hyperparamètre retenu est
   bien celui de la validation.
 
@@ -466,8 +606,7 @@ chaîne.
 
 ## Limites actuelles
 
-- Pas encore de modèle hybride, d'API ni de dashboard ; le cold start utilisateur n'est pas
-  traité.
+- Pas encore de modèle de ranking, d'API ni de dashboard.
 - MovieLens ne fournit ni description de film ni données de visionnage : les « habitudes de
   visionnage » se limiteront aux notes et à leur horodatage.
 - Les notes s'arrêtent en 2019 et proviennent d'utilisateurs ayant noté au moins 20 films :
