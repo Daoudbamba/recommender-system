@@ -35,13 +35,23 @@ def load_results(reports_dir: Path, filename: str) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def format_params(params: dict[str, Any]) -> str:
+    """Hyperparametres lisibles ; un dictionnaire de poids est ecrit `modele 0.50 + ...`."""
+    parts = []
+    for key, value in params.items():
+        if key in {"seed", "reg_bias"}:
+            continue
+        if isinstance(value, dict):
+            value = " + ".join(f"{name} {weight:.2f}" for name, weight in value.items())
+        parts.append(f"{key}={value}")
+    return ", ".join(parts)
+
+
 def results_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     """Une ligne par modele (ou configuration), colonnes = metriques."""
     frame = pd.DataFrame(rows)
     frame.insert(1, "label", frame["model"].map(MODEL_LABELS).fillna(frame["model"]))
-    frame["params"] = frame["params"].map(
-        lambda p: ", ".join(f"{k}={v}" for k, v in p.items() if k not in {"seed", "reg_bias"})
-    )
+    frame["params"] = frame["params"].map(format_params)
     return frame
 
 
@@ -123,6 +133,7 @@ def build_model_report(
     figure_prefix: str,
     reference_file: str | None = None,
     reference_models: tuple[str, ...] = (),
+    extra_reference: tuple[str, tuple[str, ...]] | None = None,
     extra_sections: list[str] | None = None,
 ) -> Path:
     """Ecrit un rapport Markdown de resultats et ses figures.
@@ -133,11 +144,14 @@ def build_model_report(
     reports_dir = config.paths.reports_dir
     results = load_results(reports_dir, results_file)
     rows = list(results["test"])
-    if reference_file:
-        reference = load_results(reports_dir, reference_file)
+    references = [(reference_file, reference_models)] if reference_file else []
+    if extra_reference:
+        references.append(extra_reference)
+    for file_name, model_names in reversed(references):
+        reference = load_results(reports_dir, file_name)
         if reference["folds"]["test"] != results["folds"]["test"]:
-            raise ValueError("les deux experiences n'ont pas ete mesurees sur le meme jeu de test")
-        rows = [r for r in reference["test"] if r["model"] in reference_models] + rows
+            raise ValueError(f"{file_name} n'a pas ete mesure sur le meme jeu de test")
+        rows = [r for r in reference["test"] if r["model"] in model_names] + rows
     test = results_frame(rows)
     validation = results_frame(results["validation"])
     ks = results["protocol"]["ks"]
@@ -190,8 +204,13 @@ def build_model_report(
         "## Résultats sur le test",
         "",
         *(
-            [f"Modèles de référence repris de `reports/{reference_file}` (même jeu de test).", ""]
-            if reference_file
+            [
+                "Modèles de référence repris de "
+                + ", ".join(f"`reports/{name}`" for name, _ in references)
+                + " (même jeu de test).",
+                "",
+            ]
+            if references
             else []
         ),
         *[part for k in ks for part in (f"### Top-{k}", "", _md(ranking_table(test, k)), "")],
