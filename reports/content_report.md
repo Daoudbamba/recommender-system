@@ -94,7 +94,7 @@ Mesuré sur 2,000 films tirés au hasard, 10 voisins par film.
 | Item-kNN (référence collaborative) | 1.0000 | 0.4037 |
 
 - Voisins communs entre TF-IDF et embeddings : **9.9%**
-- Recherche exacte dans l'index d'embeddings (62,423 films, dimension 384) : **11.0 ms** en moyenne, 12.1 ms au 95ᵉ centile.
+- Recherche exacte dans l'index d'embeddings (62,423 films, dimension 384) : **11.0 ms** en moyenne, 12.2 ms au 95ᵉ centile.
 
 ## Sélection des hyperparamètres (validation)
 
