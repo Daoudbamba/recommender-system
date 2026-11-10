@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -62,12 +63,37 @@ class EdaConfig(BaseModel):
     top_n: int = 15
 
 
+class EvaluationConfig(BaseModel):
+    """Protocole d'evaluation : coupures temporelles, pertinence, metriques."""
+
+    validation_quantile: float = Field(default=0.8, gt=0, lt=1)
+    test_quantile: float = Field(default=0.9, gt=0, lt=1)
+    relevance_threshold: float = 4.0
+    min_user_history: int = Field(default=5, ge=1)
+    ks: list[int] = [5, 10, 20]
+    batch_size: int = Field(default=256, ge=1)
+    # Metrique de selection des hyperparametres, par modele (`default` sinon).
+    selection: dict[str, str] = {"default": "ndcg@10"}
+
+    @model_validator(mode="after")
+    def _check_order(self) -> EvaluationConfig:
+        if self.validation_quantile >= self.test_quantile:
+            raise ValueError("validation_quantile doit preceder test_quantile")
+        return self
+
+    def selection_metric(self, model_name: str) -> str:
+        return self.selection.get(model_name, self.selection["default"])
+
+
 class Config(BaseModel):
     project: ProjectConfig = ProjectConfig()
     dataset: DatasetConfig
     paths: PathsConfig
     preprocessing: PreprocessingConfig = PreprocessingConfig()
     eda: EdaConfig = EdaConfig()
+    evaluation: EvaluationConfig = EvaluationConfig()
+    # Grilles d'hyperparametres : nom du modele -> liste de configurations.
+    collaborative: dict[str, list[dict[str, Any]]] = {}
 
     @property
     def raw_dataset_dir(self) -> Path:

@@ -26,3 +26,39 @@ preprocessing:
 eda:
   activity_thresholds: [1, 5, 10, 20, 50, 100]
   top_n: 15
+
+evaluation:
+  # Coupures temporelles globales, en part des notes classees par date.
+  validation_quantile: 0.8   # entrainement <= q80 < validation <= q90
+  test_quantile: 0.9         # entrainement <= q90 < test
+  relevance_threshold: 4.0   # une note >= 4 compte comme "a aime"
+  min_user_history: 5        # notes d'entrainement requises pour etre evalue
+  ks: [5, 10, 20]
+  batch_size: 256
+  selection:
+    default: ndcg@10         # maximise
+    bias_baseline: rmse      # minimise : ces deux modeles visent la note
+    als_explicit: rmse
+
+# Grilles evaluees sur la validation ; la meilleure configuration de chaque
+# modele est reentrainee puis mesuree sur le test.
+collaborative:
+  popularity:
+    - {}
+  bias_baseline:
+    - {reg_item: 5, reg_user: 5}
+    - {reg_item: 25, reg_user: 10}
+  item_knn:
+    - {k: 50, shrinkage: 0}
+    - {k: 50, shrinkage: 100}
+    - {k: 200, shrinkage: 100}
+  user_knn:
+    - {k: 50, shrinkage: 0}
+    - {k: 200, shrinkage: 50}
+  als_explicit:
+    - {factors: 32, reg: 0.05, iterations: 10}
+    - {factors: 32, reg: 0.1, iterations: 10}
+  als_implicit:
+    - {factors: 64, reg: 0.01, alpha: 10, iterations: 15}
+    - {factors: 128, reg: 0.01, alpha: 10, iterations: 15}
+    - {factors: 128, reg: 0.1, alpha: 40, iterations: 15}
