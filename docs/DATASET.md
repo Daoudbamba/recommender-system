@@ -32,7 +32,7 @@ Colonnes vérifiées sur les fichiers téléchargés (voir `notebooks/01_data_ex
 | `movies.csv` | 62 423 | `movieId`, `title`, `genres` | Catalogue, genres, année extraite du titre |
 | `tags.csv` | 1 093 360 | `userId`, `movieId`, `tag`, `timestamp` | Texte libre pour TF-IDF et embeddings |
 | `links.csv` | 62 423 | `movieId`, `imdbId`, `tmdbId` | Identifiants externes |
-| `genome-scores.csv` | non chargé | — | Non utilisé au Sprint 1 (435 Mo) ; à évaluer au Sprint 3 |
+| `genome-scores.csv` | non chargé | — | Non utilisé : scores non datés, incompatibles avec une évaluation temporelle sans fuite |
 | `genome-tags.csv` | non chargé | — | Idem |
 
 Le dataset ne contient **aucune description de film**. Le projet n'en invente pas : le contenu

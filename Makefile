@@ -2,7 +2,7 @@
 # les commandes indiquees (voir README, section Installation).
 PYTHON ?= python
 
-.PHONY: install data prepare report train model-report notebooks test lint all
+.PHONY: install data prepare report train train-content model-report notebooks test lint all
 
 install:
 	$(PYTHON) -m pip install -r requirements-dev.txt
@@ -20,13 +20,17 @@ report:
 train:
 	$(PYTHON) scripts/train_collaborative.py
 
+train-content:
+	$(PYTHON) scripts/train_content.py
+
 model-report:
 	$(PYTHON) scripts/build_model_report.py
 
 notebooks:
 	$(PYTHON) -m jupyter nbconvert --to notebook --execute --inplace \
 		--ExecutePreprocessor.timeout=1800 notebooks/01_data_exploration.ipynb notebooks/02_data_preprocessing.ipynb \
-		notebooks/04_collaborative_filtering.ipynb
+		notebooks/03_feature_engineering.ipynb notebooks/04_collaborative_filtering.ipynb \
+		notebooks/05_content_based_filtering.ipynb notebooks/06_embeddings.ipynb
 
 test:
 	$(PYTHON) -m pytest

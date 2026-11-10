@@ -4,15 +4,16 @@ Système de recommandation de films pour une plateforme de streaming fictive, co
 MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle hybride et
 *learning to rank*, exposés par une API et un dashboard.
 
-> **État d'avancement : Sprints 1 et 2 terminés (données, filtrage collaboratif).** Les sections
-> marquées *à venir* décrivent ce qui est prévu, pas ce qui existe. Tous les scores publiés ici
-> sortent de `reports/collaborative_results.json`, écrit par l'expérience réellement exécutée.
+> **État d'avancement : Sprints 1 à 3 terminés (données, filtrage collaboratif, contenu et
+> embeddings).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
+> Tous les scores publiés ici sortent des fichiers `reports/*_results.json`, écrits par les
+> expériences réellement exécutées.
 
 | Sprint | Contenu | État |
 |---|---|---|
 | 1 | Initialisation, téléchargement vérifié, exploration, nettoyage, rapport | ✅ fait |
 | 2 | Filtrage collaboratif (user-based, item-based, factorisation), protocole d'évaluation | ✅ fait |
-| 3 | Filtrage par contenu (TF-IDF) et embeddings | à venir |
+| 3 | Filtrage par contenu (TF-IDF), embeddings, moteur de films similaires | ✅ fait |
 | 4 | Système hybride, cold start, diversité | à venir |
 | 5 | Learning to rank (XGBoost) | à venir |
 | 6 | API FastAPI et dashboard Streamlit | à venir |
@@ -43,10 +44,18 @@ flowchart LR
         M --> AR[(artifacts/collaborative)]
         V --> R2[Rapport de résultats]
     end
-    subgraph S3["Sprints 3 à 7 — à venir"]
-        E --> G[Features de contenu]
-        G --> H[Contenu, embeddings,<br/>hybride, ranking]
-        AR --> H
+    subgraph S3["Sprint 3 — en place"]
+        E --> G[Documents de films :<br/>titre, genres, tags datés]
+        G --> T[TF-IDF par champ]
+        G --> EM[Embeddings<br/>Sentence Transformers]
+        T --> CB[Modèle par contenu]
+        EM --> CB
+        EM --> IX[(Index de similarité<br/>62 423 films)]
+        CB --> V
+    end
+    subgraph S4["Sprints 4 à 7 — à venir"]
+        AR --> H[Hybride, ranking]
+        CB --> H
         H --> I[(MLflow)]
         I --> J[API FastAPI]
         J --> K[Dashboard Streamlit]
@@ -62,7 +71,7 @@ recommender-system/
 ├── configs/config.yaml        configuration centrale (dataset, chemins, seuils, graine)
 ├── data/                      raw / processed / features — jamais versionné
 ├── docs/DATASET.md            provenance et conditions d'utilisation
-├── notebooks/                 01 exploration, 02 prétraitement, 04 filtrage collaboratif
+├── notebooks/                 01 à 06 : exploration, prétraitement, features, collaboratif, contenu, embeddings
 ├── reports/                   rapports générés (données, modèles) + figures + résultats JSON
 ├── scripts/                   points d'entrée en ligne de commande
 ├── src/recsys/
@@ -71,11 +80,11 @@ recommender-system/
 │   ├── preprocessing/         nettoyage (fonctions pures) et pipeline
 │   ├── analysis/              statistiques, graphiques, génération des rapports
 │   ├── evaluation/            séparation temporelle, métriques, protocole
-│   ├── models/                contrat commun + modèles collaboratifs
+│   ├── features/              documents de films, TF-IDF par champ, embeddings avec cache
+│   ├── models/                contrat commun, modèles collaboratifs, modèle par contenu, index
 │   ├── experiments/           entraînement, sélection sur validation, mesure sur test
-│   ├── utils/                 journalisation, graines aléatoires
-│   └── features/              vide pour l'instant (Sprint 3)
-└── tests/                     91 tests Pytest
+│   └── utils/                 journalisation, graines aléatoires
+└── tests/                     117 tests Pytest
 ```
 
 ## Technologies
@@ -91,6 +100,8 @@ arriveront avec le sprint qui en a besoin.
 | Pydantic, PyYAML | Configuration validée |
 | SciPy (matrices creuses) | Matrice utilisateur × film, similarités, kNN |
 | implicit | ALS pour retours implicites |
+| scikit-learn | TF-IDF et normalisation |
+| Sentence Transformers (PyTorch CPU) | Embeddings des textes de films et des requêtes |
 | Matplotlib | Figures des rapports et des notebooks |
 | Pytest, Ruff | Tests et qualité du code |
 | Jupyter | Notebooks d'exploration |
@@ -249,6 +260,97 @@ Deux limites à garder en tête en lisant les scores :
   Un réentraînement sur toutes les données est prévu avant la mise en service (Sprint 6).
 - Aucun modèle de ce sprint ne sait répondre à un utilisateur ou un film inconnu.
 
+## Filtrage par contenu et embeddings (Sprint 3)
+
+Rapport complet généré : [reports/content_report.md](reports/content_report.md).
+Notebooks : [03 feature engineering](notebooks/03_feature_engineering.ipynb),
+[05 TF-IDF](notebooks/05_content_based_filtering.ipynb),
+[06 embeddings](notebooks/06_embeddings.ipynb).
+
+### Feature engineering
+
+MovieLens ne fournit aucune description de film, et le projet n'en invente pas. Le contenu d'un
+film se limite à son titre, son année, ses genres et les tags libres posés par les utilisateurs.
+
+- **Tags agrégés par utilisateurs distincts** : les 1 093 333 applications de tags deviennent
+  463 458 couples (film, tag), pondérés par le nombre de personnes qui ont posé le tag.
+- **Pas de fuite temporelle** : les tags sont horodatés, et seuls ceux posés avant la date de
+  coupure sont utilisés. Pour le test, cela représente 52 % des couples (film, tag) du dataset.
+- **Couverture** : 72 % du catalogue complet a au moins un tag, mais 91 % des 16 007 films
+  évaluables en ont. Les films sans contenu sont surtout ceux que personne ne note.
+
+Deux représentations sont construites à partir de ces mêmes informations :
+
+| Représentation | Construction | Dimension |
+|---|---|---|
+| TF-IDF par champ | Trois blocs (genres, tags entiers, mots du titre), chacun avec son IDF, pondérés puis concaténés | 31 462 termes, 10 non nuls par film en moyenne |
+| Embeddings | Phrase « titre (année). Genres : … Tags : … » avec les 15 tags les plus consensuels, encodée par `all-MiniLM-L6-v2` | 384, dense |
+
+Le même modèle de recommandation sert pour les deux : chaque film candidat reçoit la somme de ses
+similarités avec les films aimés par l'utilisateur (note ≥ 4) parmi ses 50 plus proches voisins
+de contenu. Seule la représentation change, ce qui rend la comparaison équitable.
+
+### Résultats sur le test
+
+Même protocole, mêmes 6 206 utilisateurs et mêmes 16 007 films candidats qu'au Sprint 2.
+
+| Modèle | Precision@10 | Recall@10 | MAP@10 | NDCG@10 | Couverture@10 |
+|---|---|---|---|---|---|
+| Popularité | 0,0654 | 0,0319 | 0,0406 | 0,0786 | 1,9 % |
+| Item-kNN (collaboratif) | 0,0881 | 0,0414 | 0,0551 | 0,1029 | 24,4 % |
+| ALS implicite (collaboratif) | **0,1202** | **0,0597** | **0,0747** | **0,1381** | 12,6 % |
+| Contenu TF-IDF | 0,0890 | 0,0529 | 0,0572 | 0,1113 | 20,9 % |
+| Contenu embeddings | 0,0523 | 0,0286 | 0,0272 | 0,0610 | **24,6 %** |
+
+![Recall@k sur le test](reports/figures/content_recall_by_k.png)
+
+### Ce qu'il faut en retenir
+
+1. **Le TF-IDF sur les tags est un vrai bon modèle.** Sans utiliser une seule note des autres
+   utilisateurs pour rapprocher les films, il atteint un NDCG@10 de 0,111 : 42 % de mieux que la
+   popularité et au-dessus de l'item-kNN collaboratif (0,103). Il reste derrière l'ALS implicite.
+2. **Les embeddings génériques déçoivent en recommandation.** Avec un NDCG@10 de 0,061, ils font
+   moins bien que la simple popularité. Un modèle de langue généraliste, appliqué à une phrase
+   courte, capte surtout le titre et le thème : il rapproche des films obscurs au titre voisin.
+   Ses recommandations ont en moyenne 6 200 notes d'entraînement, contre 13 200 pour le TF-IDF.
+3. **Ce sont les tags qui portent le signal.** Sur la validation, les genres seuls donnent un
+   NDCG@10 de 0,017, les tags seuls 0,101, et la meilleure combinaison 0,103 (genres pondérés à
+   0,2, titre à 0,3).
+4. **La façon d'agréger l'historique compte autant que la représentation.** Moyenner les films
+   aimés en un profil unique donne 0,003 en TF-IDF et 0,023 en embeddings sur la validation,
+   contre 0,057 et 0,056 avec l'agrégation par voisins, à représentation identique.
+5. **Le TF-IDF tient mieux sur les gros historiques.** Son NDCG@10 passe de 0,121 à 0,103 entre
+   les plus petits et les plus gros historiques, quand l'item-kNN chute de 0,145 à 0,092.
+6. **Les trois approches voient des choses différentes.** Seuls 6 % des dix voisins TF-IDF d'un
+   film sont aussi ses voisins collaboratifs, et 10 % sont communs avec les embeddings. C'est
+   l'argument en faveur du modèle hybride du Sprint 4.
+
+### Moteur de films similaires et recherche sémantique
+
+Les embeddings servent en revanche bien le moteur de films similaires, qui couvre les 62 423
+films du catalogue, y compris les 46 000 que le filtrage collaboratif ne peut pas traiter faute
+de notes. Pour *Matrix*, il renvoie les deux suites puis *Animatrix* ; le TF-IDF renvoie les
+suites puis *Tron*, *Johnny Mnemonic* et *Dark City*, en citant les tags communs.
+
+La recherche en texte libre fonctionne mais avec des limites constatées : elle privilégie les
+films dont le titre contient les mots de la requête, et une requête en français renvoie des
+titres non anglophones sans rapport, le modèle choisi étant surtout entraîné sur de l'anglais.
+
+**FAISS n'est pas utilisé.** Une recherche exacte des dix plus proches voisins parmi 62 423
+vecteurs de dimension 384 prend 11 ms en moyenne (12 ms au 95ᵉ centile) avec un simple produit
+matriciel. Un index approché ajouterait une dépendance et une approximation sans gain
+perceptible ; le choix serait à revoir au-delà du million de vecteurs.
+
+### Limites de ce sprint
+
+- La comparaison porte sur un seul modèle d'embeddings, généraliste et non adapté au domaine,
+  et sur un seul gabarit de texte. Elle ne dit rien d'un modèle affiné sur des données de films.
+- L'évaluation n'utilise que la moitié des tags du dataset, les autres étant postérieurs à la
+  coupure : en service, avec tous les tags, le contenu serait mieux décrit qu'ici.
+- La qualité des « films similaires » n'a pas de vérité terrain : elle est jugée sur des exemples
+  et sur deux mesures indirectes (accord avec le collaboratif, cohérence de genres).
+- Un film sans tag ni genre (0,07 % des films évaluables, 4,7 % du catalogue) n'a que son titre.
+
 ## Installation
 
 Prérequis : Python 3.11, environ 2 Go d'espace disque pour les données.
@@ -299,16 +401,25 @@ Entraîne, sélectionne sur la validation et mesure sur le test les six modèles
 de moins d'une minute, dont les résultats sont écrits à part dans `reports/sample/`.
 
 ```bash
+python scripts/train_content.py
+```
+
+Même déroulé pour le filtrage par contenu, TF-IDF et embeddings (environ 25 minutes la première
+fois, dont 20 d'encodage ; les embeddings sont ensuite relus depuis le cache). Le premier
+lancement télécharge le modèle `all-MiniLM-L6-v2` (90 Mo) depuis Hugging Face.
+
+```bash
 python scripts/build_model_report.py
 ```
 
-Régénère `reports/collaborative_report.md` à partir des résultats.
+Régénère `reports/collaborative_report.md` et `reports/content_report.md` à partir des
+résultats.
 
 ```bash
 jupyter lab notebooks
 ```
 
-Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make test`, `make lint`.
+Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make test`, `make lint`.
 
 ## Tests
 
@@ -320,8 +431,8 @@ python -m pytest
 python -m ruff check .
 ```
 
-Les 91 tests tournent en quelques secondes sur des jeux miniatures, sans avoir besoin du
-dataset réel. Ils couvrent :
+Les 117 tests tournent en une dizaine de secondes sur des jeux miniatures, sans avoir besoin
+du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
 
 - **données** : configuration, téléchargement (somme de contrôle, archive corrompue, refus d'une
   archive qui écrirait hors du dossier cible), schéma inattendu, contrôles qualité, règles de
@@ -333,8 +444,17 @@ dataset réel. Ils couvrent :
   film manquant du bon genre ; exclusion des films déjà notés ; repli sur le modèle de biais
   sans voisin ; décroissance de l'erreur de l'ALS ; reproductibilité à graine fixée ;
   sauvegarde et rechargement à l'identique ;
-- **expérience** : exécution de bout en bout et vérification que l'hyperparamètre retenu est bien
-  celui de la validation.
+- **contenu** : agrégation des tags par utilisateurs distincts, exclusion des tags postérieurs à
+  la coupure, pondération des champs TF-IDF, cache d'embeddings qui n'encode que les textes
+  nouveaux, moteur de similarité (film inconnu, dimension incompatible, requête vide) ;
+- **expériences** : exécution de bout en bout et vérification que l'hyperparamètre retenu est
+  bien celui de la validation.
+
+Un test de non-régression mérite d'être signalé : avec le type de chaîne produit par le
+nettoyage (`string[pyarrow]`), les tags disparaissaient silencieusement des textes envoyés au
+modèle d'embeddings. Les tests miniatures ne le voyaient pas ; c'est l'identité suspecte des
+caches entre validation et test qui l'a révélé. Le test rejoue désormais les trois types de
+chaîne.
 
 ## Reproductibilité
 
@@ -346,14 +466,15 @@ dataset réel. Ils couvrent :
 
 ## Limites actuelles
 
-- Pas encore d'approche par contenu, d'API ni de dashboard ; les modèles collaboratifs ne
-  traitent pas le cold start.
+- Pas encore de modèle hybride, d'API ni de dashboard ; le cold start utilisateur n'est pas
+  traité.
 - MovieLens ne fournit ni description de film ni données de visionnage : les « habitudes de
   visionnage » se limiteront aux notes et à leur horodatage.
 - Les notes s'arrêtent en 2019 et proviennent d'utilisateurs ayant noté au moins 20 films :
   le dataset ne contient pas de vrais utilisateurs débutants, il faudra les simuler pour
   évaluer le cold start.
-- Les fichiers *tag genome* de l'archive ne sont pas encore exploités.
+- Les fichiers *tag genome* de l'archive ne sont pas exploités : ils décrivent les films avec
+  des scores calculés par GroupLens à partir de données que ce projet ne sait pas dater.
 - La CI GitHub Actions et Docker sont prévus au Sprint 7.
 
 ## Données et licence
