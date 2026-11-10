@@ -85,6 +85,17 @@ class EvaluationConfig(BaseModel):
         return self.selection.get(model_name, self.selection["default"])
 
 
+class ContentConfig(BaseModel):
+    """Filtrage par contenu : construction des textes, modele d'embeddings, grilles."""
+
+    max_tags: int = Field(default=15, ge=0)
+    tag_min_df: int = Field(default=3, ge=1)
+    neighbours: int = Field(default=50, ge=1)
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_batch_size: int = Field(default=128, ge=1)
+    grids: dict[str, list[dict[str, Any]]] = {}
+
+
 class Config(BaseModel):
     project: ProjectConfig = ProjectConfig()
     dataset: DatasetConfig
@@ -94,6 +105,7 @@ class Config(BaseModel):
     evaluation: EvaluationConfig = EvaluationConfig()
     # Grilles d'hyperparametres : nom du modele -> liste de configurations.
     collaborative: dict[str, list[dict[str, Any]]] = {}
+    content: ContentConfig = ContentConfig()
 
     @property
     def raw_dataset_dir(self) -> Path:

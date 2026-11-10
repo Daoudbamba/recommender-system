@@ -16,7 +16,6 @@ import pandas as pd
 from recsys.analysis import plots
 from recsys.config import Config
 
-REPORT_FILE = "collaborative_report.md"
 MODEL_LABELS = {
     "popularity": "Popularité",
     "bias_baseline": "Biais (moyennes)",
@@ -24,6 +23,8 @@ MODEL_LABELS = {
     "user_knn": "User-kNN",
     "als_explicit": "ALS explicite",
     "als_implicit": "ALS implicite",
+    "tfidf": "Contenu TF-IDF",
+    "embeddings": "Contenu embeddings",
 }
 
 
@@ -113,23 +114,48 @@ def _md(df: pd.DataFrame, floatfmt: str = ".4f") -> str:
     return _table(df, floatfmt=floatfmt)
 
 
-def build_collaborative_report(config: Config, results_file: str, per_user: pd.DataFrame) -> Path:
-    """Ecrit reports/collaborative_report.md et ses figures."""
+def build_model_report(
+    config: Config,
+    results_file: str,
+    per_user: pd.DataFrame,
+    title: str,
+    report_file: str,
+    figure_prefix: str,
+    reference_file: str | None = None,
+    reference_models: tuple[str, ...] = (),
+    extra_sections: list[str] | None = None,
+) -> Path:
+    """Ecrit un rapport Markdown de resultats et ses figures.
+
+    `reference_file` ajoute, a titre de comparaison, des modeles mesures par une
+    autre experience avec le meme protocole (memes utilisateurs, memes candidats).
+    """
     reports_dir = config.paths.reports_dir
     results = load_results(reports_dir, results_file)
-    test = results_frame(results["test"])
+    rows = list(results["test"])
+    if reference_file:
+        reference = load_results(reports_dir, reference_file)
+        if reference["folds"]["test"] != results["folds"]["test"]:
+            raise ValueError("les deux experiences n'ont pas ete mesurees sur le meme jeu de test")
+        rows = [r for r in reference["test"] if r["model"] in reference_models] + rows
+    test = results_frame(rows)
     validation = results_frame(results["validation"])
     ks = results["protocol"]["ks"]
     figures_dir = reports_dir / "figures"
 
     figures = {
-        "cf_ndcg_at_10": plot_metric(test, "ndcg@10", "NDCG@10 sur le test"),
-        "cf_recall_by_k": plot_metric_by_k(test, "recall", ks, "Recall@k sur le test"),
-        "cf_coverage_at_10": plot_metric(
+        f"{figure_prefix}_ndcg_at_10": plot_metric(test, "ndcg@10", "NDCG@10 sur le test"),
+        f"{figure_prefix}_recall_by_k": plot_metric_by_k(
+            test, "recall", ks, "Recall@k sur le test"
+        ),
+        f"{figure_prefix}_coverage_at_10": plot_metric(
             test, "coverage@10", "Part du catalogue recommandée (top-10)"
         ),
-        "cf_rmse": plot_metric(test, "rmse", "RMSE sur le test (plus bas = mieux)"),
     }
+    if "rmse" in test and test["rmse"].notna().any():
+        figures[f"{figure_prefix}_rmse"] = plot_metric(
+            test, "rmse", "RMSE sur le test (plus bas = mieux)"
+        )
     for name, fig in figures.items():
         plots.save(fig, figures_dir / f"{name}.png")
 
@@ -141,9 +167,10 @@ def build_collaborative_report(config: Config, results_file: str, per_user: pd.D
     val_columns = ["label", "params", "ndcg@10", "recall@10", "coverage@10", "fit_seconds"]
     if "rmse" in validation:
         val_columns.insert(5, "rmse")
+    rating = rating_table(test)
 
     lines = [
-        "# Filtrage collaboratif — résultats",
+        f"# {title}",
         "",
         "> Fichier généré par `python scripts/build_model_report.py` à partir de",
         f"> `reports/{results_file}`. Ne pas éditer à la main.",
@@ -162,11 +189,13 @@ def build_collaborative_report(config: Config, results_file: str, per_user: pd.D
         "",
         "## Résultats sur le test",
         "",
+        *(
+            [f"Modèles de référence repris de `reports/{reference_file}` (même jeu de test).", ""]
+            if reference_file
+            else []
+        ),
         *[part for k in ks for part in (f"### Top-{k}", "", _md(ranking_table(test, k)), "")],
-        "### Prédiction de note",
-        "",
-        _md(rating_table(test)),
-        "",
+        *(["### Prédiction de note", "", _md(rating), ""] if len(rating) else []),
         "### Coût et biais de popularité",
         "",
         _md(cost_table(test), floatfmt=",.1f"),
@@ -176,11 +205,12 @@ def build_collaborative_report(config: Config, results_file: str, per_user: pd.D
         "",
         _md(segment_table(per_user)),
         "",
+        *(extra_sections or []),
         "## Sélection des hyperparamètres (validation)",
         "",
         _md(validation[val_columns].rename(columns={"label": "modèle"})),
         "",
     ]
-    target = reports_dir / REPORT_FILE
+    target = reports_dir / report_file
     target.write_text("\n".join(lines), encoding="utf-8")
     return target

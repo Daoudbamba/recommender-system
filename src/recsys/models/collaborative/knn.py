@@ -34,7 +34,7 @@ def _unit_rows(matrix: sp.csr_matrix) -> tuple[sp.csr_matrix, np.ndarray]:
     return matrix, norms.astype(np.float32)
 
 
-def _top_k_sparse(dense: np.ndarray, k: int) -> sp.csr_matrix:
+def top_k_sparse(dense: np.ndarray, k: int) -> sp.csr_matrix:
     """Garde les `k` plus grandes valeurs strictement positives de chaque ligne."""
     k = min(k, dense.shape[1])
     cols = np.argpartition(-dense, k - 1, axis=1)[:, :k]
@@ -134,7 +134,7 @@ class ItemKNN(_NeighbourhoodModel):
             dots = (by_item[start:stop] @ by_user).toarray()
             dots /= np.outer(norms[start:stop], norms) + self.shrinkage + 1e-9
             dots[np.arange(stop - start), np.arange(start, stop)] = 0.0  # pas d'auto-similarite
-            blocks.append(_top_k_sparse(dots, self.k))
+            blocks.append(top_k_sparse(dots, self.k))
         self.similarity_ = sp.vstack(blocks, format="csr")
         self._cache_transpose()
 
@@ -205,7 +205,7 @@ class UserKNN(_NeighbourhoodModel):
         dots = (self.residuals_[user_idx] @ self.by_item_).toarray()
         dots /= np.outer(self.norms_[user_idx], self.norms_) + self.shrinkage + 1e-9
         dots[np.arange(len(user_idx)), user_idx] = 0.0  # un utilisateur n'est pas son voisin
-        return _top_k_sparse(dots, self.k)
+        return top_k_sparse(dots, self.k)
 
     def _num_den(self, user_idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         parts = [

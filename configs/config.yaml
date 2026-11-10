@@ -62,3 +62,22 @@ collaborative:
     - {factors: 64, reg: 0.01, alpha: 10, iterations: 15}
     - {factors: 128, reg: 0.01, alpha: 10, iterations: 15}
     - {factors: 128, reg: 0.1, alpha: 40, iterations: 15}
+
+content:
+  max_tags: 15          # tags les plus consensuels gardes dans le texte de chaque film
+  tag_min_df: 3         # un tag doit decrire au moins 3 films pour entrer dans le vocabulaire TF-IDF
+  neighbours: 50        # voisins de contenu gardes par film (agregation knn)
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  embedding_batch_size: 128
+  grids:
+    tfidf:
+      - {genre_weight: 1.0, tag_weight: 0.0, title_weight: 0.0, aggregation: knn}       # genres seuls
+      - {genre_weight: 1.0, tag_weight: 1.0, title_weight: 0.0, aggregation: centroid}
+      - {genre_weight: 1.0, tag_weight: 1.0, title_weight: 0.0, aggregation: knn}
+      - {genre_weight: 0.5, tag_weight: 1.0, title_weight: 0.0, aggregation: knn}
+      - {genre_weight: 0.5, tag_weight: 1.0, title_weight: 0.3, aggregation: knn}
+      - {genre_weight: 0.2, tag_weight: 1.0, title_weight: 0.3, aggregation: knn}
+      - {genre_weight: 0.0, tag_weight: 1.0, title_weight: 0.0, aggregation: knn}       # tags seuls
+    embeddings:
+      - {aggregation: centroid}
+      - {aggregation: knn}
