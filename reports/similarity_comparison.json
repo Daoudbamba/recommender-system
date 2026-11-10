@@ -1,0 +1,23 @@
+{
+  "n_sampled_movies": 2000,
+  "n_neighbours": 10,
+  "engines": {
+    "tfidf": {
+      "overlap_with_collaborative": 0.06385,
+      "genre_jaccard": 0.4677582341269841
+    },
+    "embeddings": {
+      "overlap_with_collaborative": 0.051,
+      "genre_jaccard": 0.48024509920634917
+    }
+  },
+  "collaborative_genre_jaccard": 0.4037194264069264,
+  "overlap_tfidf_embeddings": 0.0987,
+  "exact_search": {
+    "n_vectors": 62423,
+    "dimension": 384,
+    "n_queries": 200,
+    "mean_ms": 10.997151996125467,
+    "p95_ms": 12.14232500642538
+  }
+}
