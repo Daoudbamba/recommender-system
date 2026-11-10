@@ -17,6 +17,9 @@ import pandas as pd
 
 from recsys.models.base import InteractionMatrix
 
+_COLD_USER_COLUMNS = ["userId", "item_idx", "rating", "timestamp"]
+_NEW_ITEM_COLUMNS = ["user_idx", "movieId", "rating"]
+
 
 @dataclass(frozen=True)
 class Fold:
@@ -29,6 +32,11 @@ class Fold:
     train_end: pd.Timestamp
     holdout_end: pd.Timestamp
     stats: dict[str, Any] = field(default_factory=dict)
+    # Notes d'evaluation mises de cote pour le cold start (Sprint 4) :
+    # utilisateurs absents de l'entrainement, sur des films connus ;
+    cold_user_holdout: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # utilisateurs evalues, sur des films absents de l'entrainement.
+    new_item_holdout: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
     def relevant(self) -> pd.DataFrame:
@@ -90,6 +98,9 @@ def build_fold(
     eval_users = np.sort(relevant["user_idx"].unique())
     usable = usable[usable["user_idx"].isin(eval_users)]
 
+    known_item = (known["item_idx"] >= 0).to_numpy()
+    cold_users = known.loc[~warm_user.to_numpy() & known_item, _COLD_USER_COLUMNS]
+    new_items = known.loc[~known_item & known["user_idx"].isin(eval_users).to_numpy()]
     positives = holdout[holdout["rating"] >= relevance_threshold]
     stats = {
         "train_end": train_end.isoformat(),
@@ -117,5 +128,7 @@ def build_fold(
         relevance_threshold=relevance_threshold,
         train_end=train_end,
         holdout_end=holdout_end if holdout_end is not None else holdout["timestamp"].max(),
+        cold_user_holdout=cold_users.reset_index(drop=True),
+        new_item_holdout=new_items[_NEW_ITEM_COLUMNS].reset_index(drop=True),
         stats=stats,
     )
