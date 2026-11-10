@@ -1,0 +1,28 @@
+# Configuration centrale du projet. Les chemins sont relatifs a la racine du depot.
+project:
+  seed: 42
+
+dataset:
+  name: ml-25m
+  url: https://files.grouplens.org/datasets/movielens/ml-25m.zip
+  # Somme publiee par GroupLens : https://files.grouplens.org/datasets/movielens/ml-25m.zip.md5
+  md5: 6b51fb2759a8657d3bfcbfc42b592ada
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  features_dir: data/features
+  reports_dir: reports
+  artifacts_dir: artifacts
+
+preprocessing:
+  rating_min: 0.5
+  rating_max: 5.0
+  # Seuils d'activite appliques au jeu "interactions" destine aux modeles.
+  # Justification chiffree dans reports/data_report.md.
+  min_user_ratings: 20
+  min_movie_ratings: 20
+
+eda:
+  activity_thresholds: [1, 5, 10, 20, 50, 100]
+  top_n: 15
