@@ -1,0 +1,31 @@
+# Environnement
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Secrets
+.env
+
+# Donnees : jamais versionnees (licence MovieLens : pas de redistribution)
+data/raw/*
+data/processed/*
+data/features/*
+!data/**/.gitkeep
+
+# Artefacts de modeles et suivi d'experiences
+artifacts/*
+!artifacts/.gitkeep
+mlruns/
+
+# Editeur / OS
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
