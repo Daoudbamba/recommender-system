@@ -20,6 +20,8 @@ dependencies = [
     "scipy>=1.13",
     "implicit>=0.7.2",
     "threadpoolctl>=3",
+    "scikit-learn>=1.5",
+    "sentence-transformers>=3",
 ]
 
 [project.optional-dependencies]
