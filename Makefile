@@ -2,7 +2,7 @@
 # les commandes indiquees (voir README, section Installation).
 PYTHON ?= python
 
-.PHONY: install data prepare report train train-content train-hybrid model-report notebooks test lint all
+.PHONY: install data prepare report train train-content train-hybrid train-ranking model-report notebooks test lint all
 
 install:
 	$(PYTHON) -m pip install -r requirements-dev.txt
@@ -26,6 +26,9 @@ train-content:
 train-hybrid:
 	$(PYTHON) scripts/train_hybrid.py
 
+train-ranking:
+	$(PYTHON) scripts/train_ranking.py
+
 model-report:
 	$(PYTHON) scripts/build_model_report.py
 
@@ -34,7 +37,7 @@ notebooks:
 		--ExecutePreprocessor.timeout=1800 notebooks/01_data_exploration.ipynb notebooks/02_data_preprocessing.ipynb \
 		notebooks/03_feature_engineering.ipynb notebooks/04_collaborative_filtering.ipynb \
 		notebooks/05_content_based_filtering.ipynb notebooks/06_embeddings.ipynb \
-		notebooks/07_hybrid_recommendation.ipynb
+		notebooks/07_hybrid_recommendation.ipynb notebooks/08_ranking_model.ipynb
 
 test:
 	$(PYTHON) -m pytest
