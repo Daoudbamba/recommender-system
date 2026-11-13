@@ -4,8 +4,8 @@ Système de recommandation de films pour une plateforme de streaming fictive, co
 MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle hybride et
 *learning to rank*, exposés par une API et un dashboard.
 
-> **État d'avancement : Sprints 1 à 4 terminés (données, filtrage collaboratif, contenu et
-> embeddings, système hybride).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
+> **État d'avancement : Sprints 1 à 5 terminés (données, filtrage collaboratif, contenu et
+> embeddings, système hybride, learning to rank).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
 > Tous les scores publiés ici sortent des fichiers `reports/*_results.json`, écrits par les
 > expériences réellement exécutées.
 
@@ -15,7 +15,7 @@ MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle
 | 2 | Filtrage collaboratif (user-based, item-based, factorisation), protocole d'évaluation | ✅ fait |
 | 3 | Filtrage par contenu (TF-IDF), embeddings, moteur de films similaires | ✅ fait |
 | 4 | Système hybride, cold start, diversité | ✅ fait |
-| 5 | Learning to rank (XGBoost) | à venir |
+| 5 | Learning to rank (XGBoost) | ✅ fait |
 | 6 | API FastAPI et dashboard Streamlit | à venir |
 | 7 | MLflow, Docker, CI, documentation finale | à venir |
 
@@ -60,8 +60,13 @@ flowchart LR
         HY --> CS[Cold start :<br/>utilisateur, film]
         HY --> V
     end
-    subgraph S5["Sprints 5 à 7 — à venir"]
-        HY --> H[Ranking XGBoost]
+    subgraph S5["Sprint 5 — en place"]
+        HY --> CA[100 candidats<br/>par utilisateur]
+        CA --> FE[19 variables<br/>par candidat]
+        FE --> H[Ranking XGBoost]
+        H --> V
+    end
+    subgraph S6["Sprints 6 et 7 — à venir"]
         H --> I[(MLflow)]
         I --> J[API FastAPI]
         J --> K[Dashboard Streamlit]
@@ -77,7 +82,7 @@ recommender-system/
 ├── configs/config.yaml        configuration centrale (dataset, chemins, seuils, graine)
 ├── data/                      raw / processed / features — jamais versionné
 ├── docs/DATASET.md            provenance et conditions d'utilisation
-├── notebooks/                 01 à 07 : exploration, prétraitement, features, collaboratif, contenu, embeddings, hybride
+├── notebooks/                 01 à 08 : exploration, prétraitement, features, collaboratif, contenu, embeddings, hybride, ranking
 ├── reports/                   rapports générés (données, modèles) + figures + résultats JSON
 ├── scripts/                   points d'entrée en ligne de commande
 ├── src/recsys/
@@ -86,11 +91,11 @@ recommender-system/
 │   ├── preprocessing/         nettoyage (fonctions pures) et pipeline
 │   ├── analysis/              statistiques, graphiques, génération des rapports
 │   ├── evaluation/            séparation temporelle, métriques, protocole
-│   ├── features/              documents de films, TF-IDF par champ, embeddings avec cache
-│   ├── models/                contrat commun, collaboratif, contenu, hybride, re-classement, cold start
+│   ├── features/              documents de films, TF-IDF, embeddings avec cache, variables de ranking
+│   ├── models/                contrat commun, collaboratif, contenu, hybride, cold start, ranking
 │   ├── experiments/           entraînement, sélection sur validation, mesure sur test
 │   └── utils/                 journalisation, graines aléatoires
-└── tests/                     142 tests Pytest
+└── tests/                     158 tests Pytest
 ```
 
 ## Technologies
@@ -108,6 +113,7 @@ arriveront avec le sprint qui en a besoin.
 | implicit | ALS pour retours implicites |
 | scikit-learn | TF-IDF et normalisation |
 | Sentence Transformers (PyTorch CPU) | Embeddings des textes de films et des requêtes |
+| XGBoost | Modèle de ranking (`XGBRanker`) |
 | Matplotlib | Figures des rapports et des notebooks |
 | Pytest, Ruff | Tests et qualité du code |
 | Jupyter | Notebooks d'exploration |
@@ -475,6 +481,111 @@ juste ajouté n'a pas encore de tags, et son contenu se réduit à son titre et 
   au moins 20 films. De vrais visiteurs d'un soir se comporteraient autrement.
 - Servir l'hybride demande quatre modèles en mémoire (environ 1,5 Go d'artefacts).
 
+## Learning to rank avec XGBoost (Sprint 5)
+
+Rapport complet généré : [reports/ranking_report.md](reports/ranking_report.md).
+Démonstration commentée : [notebooks/08_ranking_model.ipynb](notebooks/08_ranking_model.ipynb).
+
+### Architecture en deux étages
+
+1. **Génération de candidats** : l'hybride du Sprint 4 propose 100 films par utilisateur.
+2. **Ranking** : un `XGBRanker` les réordonne à partir de 19 variables, et apprend lui-même
+   comment pondérer les modèles au lieu de s'en remettre à des poids fixés à la main.
+
+### Prévention des fuites
+
+| | Modèles de base entraînés jusqu'au | Labels pris entre |
+|---|---|---|
+| Entraînement du ranker | 25 juin 2016 | 25 juin 2016 et 4 janvier 2018 |
+| Test du ranker | 4 janvier 2018 | 4 janvier 2018 et 21 novembre 2019 |
+
+- Les variables d'une ligne ne regardent jamais au-delà du début de la période de ses labels :
+  c'est ce dont on disposerait au moment de recommander.
+- Les modèles de base qui produisent les scores n'ont pas vu les notes servant de labels. Sans
+  cela, leurs scores seraient artificiellement bons à l'entraînement et le ranker apprendrait à
+  leur faire trop confiance.
+- Les hyperparamètres sont choisis sur 1 001 utilisateurs mis de côté parmi les 5 006 du jeu
+  d'entraînement du ranker. Le test ne sert qu'à la mesure finale.
+- `XGBRanker` exige des lignes groupées par requête : chaque utilisateur occupe 100 lignes
+  consécutives, et l'entraînement refuse un jeu dont les groupes ne seraient pas triés.
+
+### Variables
+
+| Famille | Variables |
+|---|---|
+| Modèles | score centré-réduit et rang de chacun des quatre modèles, score de l'hybride |
+| Film | popularité, note moyenne, part de notes positives, âge à la date de coupure |
+| Utilisateur | taille de l'historique, note moyenne, part de films aimés |
+| Croisées | affinité de genres, écart d'année et écart de popularité avec les films aimés |
+
+Toutes sont calculées sur la seule période d'entraînement du fold. Une information manquante
+(film sans année, utilisateur sans film aimé) reste manquante : XGBoost la gère nativement.
+
+### Définition des labels
+
+Parmi les 400 500 lignes d'entraînement, 89 % concernent un film que l'utilisateur n'a jamais
+noté. Deux schémas ont été comparés pour ne pas traiter d'office cette absence comme un rejet :
+
+| Schéma | Définition | NDCG@10 (jeu de réglage) |
+|---|---|---|
+| Gradué | 2 = aimé (note ≥ 4), 1 = non noté, 0 = noté sous 4 | 0,2265 |
+| Binaire | 1 = aimé, 0 = tout le reste | **0,2281** |
+
+Distinguer « inconnu » de « rejeté » n'a pas aidé : l'écart est dans le bruit, et le schéma
+binaire, légèrement devant, a été retenu. Le résultat est rapporté tel quel. L'explication
+probable est que les rejets explicites sont rares (4 % des lignes) et déjà mal classés par
+l'hybride.
+
+### Résultats sur le test
+
+Même protocole, mêmes 6 206 utilisateurs et même catalogue que tous les modèles précédents.
+
+| Modèle | Precision@10 | Recall@10 | MAP@10 | NDCG@10 | Couverture@10 |
+|---|---|---|---|---|---|
+| Popularité | 0,0654 | 0,0319 | 0,0406 | 0,0786 | 1,9 % |
+| ALS implicite | 0,1202 | 0,0597 | 0,0747 | 0,1381 | 12,6 % |
+| Hybride RRF | 0,1313 | 0,0674 | 0,0855 | 0,1527 | **15,8 %** |
+| Ranking, scores des modèles seuls | 0,1261 | 0,0641 | 0,0784 | 0,1434 | 14,9 % |
+| Ranking, sans variables de récence | 0,1493 | 0,0852 | 0,1007 | 0,1772 | 14,0 % |
+| **Ranking XGBoost complet** | **0,1661** | **0,1014** | **0,1221** | **0,2079** | 12,0 % |
+
+![Importance des variables](reports/figures/ranking_feature_importance.png)
+
+### Ce qu'il faut en retenir
+
+1. **Le ranker est le meilleur modèle du projet** : NDCG@10 de 0,208, soit 36 % de mieux que
+   l'hybride et 2,6 fois la popularité. Le rappel à 10 progresse de 50 %.
+2. **Le gain ne vient pas d'une meilleure pondération des modèles.** Avec les seuls scores des
+   modèles, le ranker fait moins bien que l'hybride (0,143 contre 0,153). Ce sont les variables
+   que l'hybride ne voit pas qui font la différence.
+3. **La récence explique environ la moitié du gain.** L'âge du film est la deuxième variable la
+   plus utile (20 % du gain total). Sans les deux variables de récence, le ranker reste à 0,177,
+   16 % au-dessus de l'hybride : après la coupure, les utilisateurs notent surtout des sorties
+   récentes, ce qu'aucun modèle précédent ne pouvait savoir.
+4. **Un saut de cette taille a d'abord été traité comme suspect.** La vérification de
+   l'importance des variables a écarté une fuite et révélé une variable mal conçue : l'année
+   absolue, dont le sens change quand la date de coupure avance. Remplacée par l'âge du film à
+   la date de coupure, elle fait passer le NDCG@10 de 0,204 à 0,208.
+5. **Les gros utilisateurs en profitent le plus** : le NDCG@10 passe de 0,151 à 0,241 pour les
+   historiques de plus de 1 000 notes. Au total, 42 % des utilisateurs sont mieux servis que
+   par l'hybride, 22 % moins bien, 36 % à égalité.
+6. **Le prix à payer** : la couverture recule de 15,8 % à 12,0 %, et servir un utilisateur
+   coûte 21 ms contre 4 ms pour l'hybride.
+
+### Limites de ce sprint
+
+- Le ranker ne peut que réordonner les candidats de l'hybride : 32 % seulement des films aimés
+  figurent parmi les 100 candidats. C'est le plafond de son rappel, et la première piste
+  d'amélioration (davantage de candidats, ou plusieurs générateurs).
+- Le poids de la récence reflète la façon dont MovieLens est utilisé : il ne se transpose pas
+  tel quel à une autre plateforme.
+- Le ranker est entraîné sur 5 006 utilisateurs revenus après la coupure, donc de gros
+  utilisateurs. Le cold start reste confié à la stratégie du Sprint 4.
+- Un seul découpage temporel et une seule graine : pas d'intervalle de confiance, et l'écart
+  entre les deux schémas de labels n'est pas significatif.
+- La baisse de couverture n'a pas été corrigée : le re-classement par diversité du Sprint 4
+  n'est pas encore appliqué en sortie du ranker.
+
 ## Installation
 
 Prérequis : Python 3.11, environ 2 Go d'espace disque pour les données.
@@ -541,17 +652,24 @@ le cold start (environ 20 minutes). Prérequis : les deux expériences précéde
 résultats fournissent les hyperparamètres des composants.
 
 ```bash
+python scripts/train_ranking.py
+```
+
+Construit le jeu d'entraînement du ranker, règle XGBoost sur le jeu de dev, mesure le test avec
+deux ablations (environ 15 minutes). Prérequis : les trois expériences précédentes.
+
+```bash
 python scripts/build_model_report.py
 ```
 
-Régénère les trois rapports (`collaborative_report.md`, `content_report.md`,
-`hybrid_report.md`) à partir des résultats.
+Régénère les quatre rapports (`collaborative_report.md`, `content_report.md`,
+`hybrid_report.md`, `ranking_report.md`) à partir des résultats.
 
 ```bash
 jupyter lab notebooks
 ```
 
-Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make train-hybrid`, `make test`, `make lint`.
+Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make train-hybrid`, `make train-ranking`, `make test`, `make lint`.
 
 ## Tests
 
@@ -563,7 +681,7 @@ python -m pytest
 python -m ruff check .
 ```
 
-Les 142 tests tournent en une vingtaine de secondes sur des jeux miniatures, sans avoir besoin
+Les 158 tests tournent en une trentaine de secondes sur des jeux miniatures, sans avoir besoin
 du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
 
 - **données** : configuration, téléchargement (somme de contrôle, archive corrompue, refus d'une
@@ -587,8 +705,14 @@ du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
 - **cold start** : même cible pour toutes les tailles d'historique, films révélés exclus des
   candidats, utilisateur inconnu servi à partir de quelques notes, « fold-in » de l'ALS cohérent
   avec le vecteur appris, cas sans aucun utilisateur exploitable ;
-- **expériences** : exécution de bout en bout et vérification que l'hyperparamètre retenu est
-  bien celui de la validation.
+- **ranking** : candidats sans film déjà vu, statistiques calculées sur l'entraînement seul,
+  âge du film mesuré à la date de coupure, information manquante laissée manquante, labels
+  gradués distincts pour « inconnu » et « rejeté », refus d'un jeu dont les groupes ne sont pas
+  triés, reproductibilité à graine fixée, et vérification qu'aucune note de la période de test
+  ne sert de label d'entraînement ;
+- **expériences** : exécution de bout en bout des quatre expériences enchaînées sur un
+  mini-projet synthétique, et vérification que l'hyperparamètre retenu est bien celui de la
+  validation.
 
 Un test de non-régression mérite d'être signalé : avec le type de chaîne produit par le
 nettoyage (`string[pyarrow]`), les tags disparaissaient silencieusement des textes envoyés au
@@ -606,7 +730,7 @@ chaîne.
 
 ## Limites actuelles
 
-- Pas encore de modèle de ranking, d'API ni de dashboard.
+- Pas encore d'API ni de dashboard.
 - MovieLens ne fournit ni description de film ni données de visionnage : les « habitudes de
   visionnage » se limiteront aux notes et à leur horodatage.
 - Les notes s'arrêtent en 2019 et proviennent d'utilisateurs ayant noté au moins 20 films :
