@@ -112,6 +112,15 @@ class HybridConfig(BaseModel):
     cold_start_priors: list[float] = [0.5, 1.0, 3.0]
 
 
+class RankingConfig(BaseModel):
+    """Learning to rank : candidats, jeu de dev, grille XGBoost, schemas de labels."""
+
+    n_candidates: int = Field(default=100, ge=10)
+    dev_share: float = Field(default=0.2, gt=0, lt=1)
+    label_schemes: list[str] = ["graded", "binary"]
+    grid: list[dict[str, Any]] = [{"max_depth": 6}]
+
+
 class Config(BaseModel):
     project: ProjectConfig = ProjectConfig()
     dataset: DatasetConfig
@@ -123,6 +132,7 @@ class Config(BaseModel):
     collaborative: dict[str, list[dict[str, Any]]] = {}
     content: ContentConfig = ContentConfig()
     hybrid: HybridConfig = HybridConfig()
+    ranking: RankingConfig = RankingConfig()
 
     @property
     def raw_dataset_dir(self) -> Path:

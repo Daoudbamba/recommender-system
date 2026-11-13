@@ -61,7 +61,10 @@ def ranking_table(frame: pd.DataFrame, k: int) -> pd.DataFrame:
 
 
 def rating_table(frame: pd.DataFrame) -> pd.DataFrame:
-    rated = frame.dropna(subset=["rmse"]) if "rmse" in frame else frame.iloc[0:0]
+    """RMSE et MAE des modeles qui predisent une note ; vide si aucun n'en predit."""
+    if "rmse" not in frame:
+        return pd.DataFrame(columns=["modèle", "rmse", "mae"])
+    rated = frame.dropna(subset=["rmse"])
     return rated[["label", "rmse", "mae"]].rename(columns={"label": "modèle"})
 
 

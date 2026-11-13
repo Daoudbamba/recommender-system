@@ -83,3 +83,84 @@ def config(tmp_path: Path) -> Config:
             "eda": {"activity_thresholds": [1, 2], "top_n": 3},
         }
     )
+
+
+def fake_encoder(texts):
+    """Encodeur factice : le vecteur ne depend que du genre present dans le texte."""
+    import numpy as np
+
+    return np.array(
+        [[1.0, 0.1] if "Sci-Fi" in text else [0.1, 1.0] for text in texts], dtype=np.float32
+    )
+
+
+@pytest.fixture
+def synthetic_project(config: Config) -> Config:
+    """Mini-projet complet : deux genres, des gouts qui suivent le genre, des arrivees tardives.
+
+    Ecrit ratings / movies / tags dans le dossier temporaire et regle la configuration pour
+    que toutes les experiences (collaboratif, contenu, hybride, ranking) tournent en secondes.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(2)
+    n_movies, n_users = 40, 120
+    start = pd.Timestamp("2020-01-01", tz="UTC")
+    movies = pd.DataFrame(
+        {
+            "movieId": range(1, n_movies + 1),
+            "title": [f"Film {m} (2000)" for m in range(1, n_movies + 1)],
+            "title_clean": [f"Film {m}" for m in range(1, n_movies + 1)],
+            "year": pd.array([1990 + m % 30 for m in range(1, n_movies + 1)], dtype="Int16"),
+            "genres": [["Sci-Fi"] if m % 2 else ["Romance"] for m in range(1, n_movies + 1)],
+        }
+    )
+    rows = []
+    for user in range(1, n_users + 1):
+        late = user % 3 == 0  # un tiers des utilisateurs n'arrive qu'en fin de periode
+        for movie in rng.choice(np.arange(1, n_movies + 1), size=24, replace=False):
+            hour = int(rng.integers(1950, 2000) if late else rng.integers(0, 2000))
+            rows.append((user, movie, 4.5 if movie % 2 == user % 2 else 2.0, hour))
+    ratings = pd.DataFrame(rows, columns=["userId", "movieId", "rating", "h"])
+    ratings["timestamp"] = start + pd.to_timedelta(ratings.pop("h"), "h")
+    tags = pd.DataFrame(
+        {"userId": [1, 2], "movieId": [1, 3], "tag": ["robots", "robots"], "timestamp": [start] * 2}
+    )
+    processed = config.paths.processed_dir
+    processed.mkdir(parents=True)
+    ratings.to_parquet(processed / "ratings.parquet")
+    movies.to_parquet(processed / "movies.parquet")
+    tags.to_parquet(processed / "tags.parquet")
+
+    config.evaluation.ks = [5, 10]
+    config.evaluation.min_user_history = 3
+    config.evaluation.validation_quantile = 0.4
+    config.evaluation.test_quantile = 0.6
+    config.preprocessing.min_movie_ratings = 5
+    config.content.tag_min_df = 1
+    config.content.neighbours = 10
+    config.collaborative = {
+        "item_knn": [{"k": 10}],
+        "als_implicit": [{"factors": 4, "iterations": 5}],
+    }
+    config.content.grids = {
+        "tfidf": [{"genre_weight": 1.0, "tag_weight": 1.0, "aggregation": "knn"}],
+        "embeddings": [{"aggregation": "knn"}],
+    }
+    config.hybrid.components = {
+        "als_implicit": "collaborative",
+        "item_knn": "collaborative",
+        "tfidf": "content",
+        "embeddings": "content",
+    }
+    config.hybrid.strategies = ["rrf"]
+    config.hybrid.weight_sets = [{"als_implicit": 1, "tfidf": 1}]
+    config.hybrid.diversity_pool = 10
+    config.hybrid.diversity_lambdas = [1.0]
+    config.hybrid.popularity_penalties = [0.0]
+    config.hybrid.cold_start_users = 20
+    config.hybrid.cold_start_history_sizes = [0, 2]
+    config.hybrid.cold_start_priors = [0.5]
+    config.ranking.n_candidates = 10
+    config.ranking.grid = [{"max_depth": 2, "n_estimators": 30, "min_child_weight": 0}]
+    return config

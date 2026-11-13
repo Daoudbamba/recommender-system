@@ -13,8 +13,9 @@ import pandas as pd
 from recsys.analysis import similarity
 from recsys.analysis.hybrid_report import hybrid_sections
 from recsys.analysis.model_report import MODEL_LABELS, _md, build_model_report, load_results
+from recsys.analysis.ranking_report import ranking_sections
 from recsys.config import Config, load_config
-from recsys.experiments import collaborative, content, hybrid
+from recsys.experiments import collaborative, content, hybrid, ranking
 from recsys.models.collaborative import ItemKNN
 from recsys.models.content_based import ContentBasedRecommender, SimilarityIndex
 
@@ -170,12 +171,44 @@ def hybrid_report(config: Config) -> None:
     print(f"Rapport ecrit : {path}")
 
 
+def ranking_report(config: Config) -> None:
+    artifacts = config.paths.artifacts_dir
+    results = load_results(config.paths.reports_dir, ranking.RESULTS_FILE)
+    best_hybrid = load_results(config.paths.reports_dir, hybrid.RESULTS_FILE)["best"]["model"]
+    per_user = pd.concat(
+        [
+            pd.read_parquet(
+                artifacts / collaborative.ARTIFACT_DIR / collaborative.PER_USER_FILE
+            ).query("model in ['popularity', 'als_implicit']"),
+            pd.read_parquet(artifacts / hybrid.ARTIFACT_DIR / hybrid.PER_USER_FILE).query(
+                "model == @best_hybrid"
+            ),
+            pd.read_parquet(artifacts / ranking.ARTIFACT_DIR / ranking.PER_USER_FILE),
+        ],
+        ignore_index=True,
+    )
+    path = build_model_report(
+        config,
+        ranking.RESULTS_FILE,
+        per_user,
+        title="Learning to rank (XGBoost) — résultats",
+        report_file="ranking_report.md",
+        figure_prefix="ranking",
+        reference_file=collaborative.RESULTS_FILE,
+        reference_models=("popularity", "als_implicit"),
+        extra_reference=(hybrid.RESULTS_FILE, (best_hybrid,)),
+        extra_sections=ranking_sections(results, config.paths.reports_dir / "figures"),
+    )
+    print(f"Rapport ecrit : {path}")
+
+
 def main() -> None:
     config = load_config()
     reports = {
         collaborative.RESULTS_FILE: collaborative_report,
         content.RESULTS_FILE: content_report,
         hybrid.RESULTS_FILE: hybrid_report,
+        ranking.RESULTS_FILE: ranking_report,
     }
     for results_file, build in reports.items():
         if (config.paths.reports_dir / results_file).is_file():
