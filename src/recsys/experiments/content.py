@@ -19,7 +19,6 @@ from recsys.features.embeddings import (
     build_embedding_features,
     sentence_transformer_encoder,
 )
-from recsys.features.item_features import ItemFeatures
 from recsys.features.item_text import aggregate_tags, build_item_documents, content_coverage
 from recsys.features.tfidf import build_tfidf_features
 from recsys.models.content_based import ContentBasedRecommender, SimilarityIndex
@@ -54,41 +53,55 @@ def load_content_tables(config: Config) -> tuple[pd.DataFrame, pd.DataFrame]:
     )
 
 
+def build_content_model(
+    name: str,
+    params: dict[str, Any],
+    documents: pd.DataFrame,
+    tag_counts: pd.DataFrame,
+    config: Config,
+    encoder: Encoder,
+) -> ContentBasedRecommender:
+    """Modele par contenu non entraine (`tfidf` ou `embeddings`) pour des documents donnes.
+
+    Point d'entree unique, partage par l'evaluation (documents limites a une date de
+    coupure) et par l'entrainement de production (tous les tags disponibles).
+    """
+    cfg = config.content
+    if name == "tfidf":
+        extra: dict[str, Any] = {field: params.get(field, 0.0) for field in TFIDF_FIELDS}
+        features = build_tfidf_features(documents, tag_counts, tag_min_df=cfg.tag_min_df, **extra)
+    elif name == "embeddings":
+        features = build_embedding_features(
+            documents, cfg.embedding_model, encoder, config.paths.features_dir / "embeddings"
+        )
+        extra = {"model": cfg.embedding_model, "max_tags": cfg.max_tags}
+    else:
+        raise KeyError(f"modele par contenu inconnu : {name}")
+    return ContentBasedRecommender(
+        features,
+        aggregation=params.get("aggregation", "knn"),
+        k=params.get("k", cfg.neighbours),
+        relevance_threshold=config.evaluation.relevance_threshold,
+        name=name,
+        extra_params=extra,
+    )
+
+
 def make_builders(
     contents: dict[int, FoldContent], config: Config, encoder: Encoder
 ) -> dict[str, Builder]:
     """Constructeurs de modeles ; `contents` associe chaque fold a son contenu."""
-    cfg = config.content
-    cache_dir = config.paths.features_dir / "embeddings"
-    threshold = config.evaluation.relevance_threshold
 
-    def recommender(features: ItemFeatures, name: str, params: dict[str, Any], extra: dict):
-        return ContentBasedRecommender(
-            features,
-            aggregation=params.get("aggregation", "knn"),
-            k=params.get("k", cfg.neighbours),
-            relevance_threshold=threshold,
-            name=name,
-            extra_params=extra,
-        )
+    def builder(name: str) -> Builder:
+        def build(params: dict[str, Any], fold: Fold) -> ContentBasedRecommender:
+            content = contents[id(fold)]
+            return build_content_model(
+                name, params, content.documents, content.tag_counts, config, encoder
+            )
 
-    def tfidf(params: dict[str, Any], fold: Fold) -> ContentBasedRecommender:
-        content = contents[id(fold)]
-        weights = {field: params.get(field, 0.0) for field in TFIDF_FIELDS}
-        features = build_tfidf_features(
-            content.documents, content.tag_counts, tag_min_df=cfg.tag_min_df, **weights
-        )
-        return recommender(features, "tfidf", params, weights)
+        return build
 
-    def embeddings(params: dict[str, Any], fold: Fold) -> ContentBasedRecommender:
-        content = contents[id(fold)]
-        features = build_embedding_features(
-            content.documents, cfg.embedding_model, encoder, cache_dir
-        )
-        extra = {"model": cfg.embedding_model, "max_tags": cfg.max_tags}
-        return recommender(features, "embeddings", params, extra)
-
-    return {"tfidf": tfidf, "embeddings": embeddings}
+    return {name: builder(name) for name in ("tfidf", "embeddings")}
 
 
 def build_catalog_index(
