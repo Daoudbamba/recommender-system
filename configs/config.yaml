@@ -109,3 +109,14 @@ hybrid:
   cold_start_history_sizes: [0, 1, 3, 5, 10]  # notes revelees au modele
   # Poids de la popularite = prior / (prior + n) ; le prior est choisi sur la validation.
   cold_start_priors: [0.25, 0.5, 1.0, 3.0]
+
+ranking:
+  n_candidates: 100       # films proposes par l'hybride et reordonnes par le ranker
+  dev_share: 0.2          # part des utilisateurs d'entrainement du ranker gardee pour le reglage
+  # graded : 2 aime, 1 non note (inconnu), 0 note sous le seuil (rejet explicite)
+  # binary : 1 aime, 0 sinon (reference, confond inconnu et rejet)
+  label_schemes: [graded, binary]
+  grid:
+    - {max_depth: 4, learning_rate: 0.05}
+    - {max_depth: 6, learning_rate: 0.05}
+    - {max_depth: 6, learning_rate: 0.1}
