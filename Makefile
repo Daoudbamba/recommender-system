@@ -2,7 +2,7 @@
 # les commandes indiquees (voir README, section Installation).
 PYTHON ?= python
 
-.PHONY: install data prepare report train train-content train-hybrid train-ranking model-report notebooks test lint all
+.PHONY: install data prepare report train train-content train-hybrid train-ranking train-production api dashboard model-report notebooks test lint all
 
 install:
 	$(PYTHON) -m pip install -r requirements-dev.txt
@@ -28,6 +28,15 @@ train-hybrid:
 
 train-ranking:
 	$(PYTHON) scripts/train_ranking.py
+
+train-production:
+	$(PYTHON) scripts/train_production.py
+
+api:
+	$(PYTHON) -m uvicorn api.main:app --port 8000
+
+dashboard:
+	$(PYTHON) -m streamlit run dashboard/app.py
 
 model-report:
 	$(PYTHON) scripts/build_model_report.py

@@ -4,8 +4,8 @@ Système de recommandation de films pour une plateforme de streaming fictive, co
 MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle hybride et
 *learning to rank*, exposés par une API et un dashboard.
 
-> **État d'avancement : Sprints 1 à 5 terminés (données, filtrage collaboratif, contenu et
-> embeddings, système hybride, learning to rank).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
+> **État d'avancement : Sprints 1 à 6 terminés (données, filtrage collaboratif, contenu et
+> embeddings, système hybride, learning to rank, API et dashboard).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
 > Tous les scores publiés ici sortent des fichiers `reports/*_results.json`, écrits par les
 > expériences réellement exécutées.
 
@@ -16,7 +16,7 @@ MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle
 | 3 | Filtrage par contenu (TF-IDF), embeddings, moteur de films similaires | ✅ fait |
 | 4 | Système hybride, cold start, diversité | ✅ fait |
 | 5 | Learning to rank (XGBoost) | ✅ fait |
-| 6 | API FastAPI et dashboard Streamlit | à venir |
+| 6 | API FastAPI et dashboard Streamlit | ✅ fait |
 | 7 | MLflow, Docker, CI, documentation finale | à venir |
 
 ## Problématique
@@ -66,22 +66,28 @@ flowchart LR
         FE --> H[Ranking XGBoost]
         H --> V
     end
-    subgraph S6["Sprints 6 et 7 — à venir"]
-        H --> I[(MLflow)]
-        I --> J[API FastAPI]
+    subgraph S6["Sprint 6 — en place"]
+        H --> PR[Entraînement de production<br/>sur toutes les données]
+        PR --> BU[(artifacts/production)]
+        BU --> J[API FastAPI]
         J --> K[Dashboard Streamlit]
+    end
+    subgraph S7["Sprint 7 — à venir"]
+        BU --> I[(MLflow, Docker, CI)]
     end
 ```
 
-Toute la logique vit dans le paquet installable `src/recsys`. Les notebooks, les scripts, et
-plus tard l'API et le dashboard, ne font que l'appeler : un calcul n'existe qu'à un seul
+Toute la logique vit dans le paquet installable `src/recsys`. Les notebooks, les scripts et
+l'API ne font que l'appeler, et le dashboard ne parle qu'à l'API : un calcul n'existe qu'à un seul
 endroit, et cet endroit est testé.
 
 ```
 recommender-system/
+├── api/                       API FastAPI : routes, schémas Pydantic, service métier
 ├── configs/config.yaml        configuration centrale (dataset, chemins, seuils, graine)
+├── dashboard/                 dashboard Streamlit : 5 pages, client HTTP de l'API, thème
 ├── data/                      raw / processed / features — jamais versionné
-├── docs/DATASET.md            provenance et conditions d'utilisation
+├── docs/                      provenance du dataset, captures du dashboard
 ├── notebooks/                 01 à 08 : exploration, prétraitement, features, collaboratif, contenu, embeddings, hybride, ranking
 ├── reports/                   rapports générés (données, modèles) + figures + résultats JSON
 ├── scripts/                   points d'entrée en ligne de commande
@@ -94,8 +100,9 @@ recommender-system/
 │   ├── features/              documents de films, TF-IDF, embeddings avec cache, variables de ranking
 │   ├── models/                contrat commun, collaboratif, contenu, hybride, cold start, ranking
 │   ├── experiments/           entraînement, sélection sur validation, mesure sur test
+│   ├── serving/               entraînement de production, chargement unique des modèles
 │   └── utils/                 journalisation, graines aléatoires
-└── tests/                     158 tests Pytest
+└── tests/                     205 tests Pytest
 ```
 
 ## Technologies
@@ -114,6 +121,9 @@ arriveront avec le sprint qui en a besoin.
 | scikit-learn | TF-IDF et normalisation |
 | Sentence Transformers (PyTorch CPU) | Embeddings des textes de films et des requêtes |
 | XGBoost | Modèle de ranking (`XGBRanker`) |
+| FastAPI, Pydantic, Uvicorn | API REST, validation des requêtes, documentation Swagger |
+| Streamlit, Plotly | Dashboard interactif |
+| httpx | Client HTTP du dashboard vers l'API |
 | Matplotlib | Figures des rapports et des notebooks |
 | Pytest, Ruff | Tests et qualité du code |
 | Jupyter | Notebooks d'exploration |
@@ -586,6 +596,117 @@ Même protocole, mêmes 6 206 utilisateurs et même catalogue que tous les modè
 - La baisse de couverture n'a pas été corrigée : le re-classement par diversité du Sprint 4
   n'est pas encore appliqué en sortie du ranker.
 
+## API et dashboard (Sprint 6)
+
+### Des modèles évalués aux modèles servis
+
+L'évaluation réserve les notes les plus récentes au test. Une fois les choix arrêtés,
+`scripts/train_production.py` réentraîne tous les modèles sur **l'ensemble** des 25 M de notes
+(162 541 utilisateurs, 18 430 films recommandables) et écrit un bundle dans
+`artifacts/production/`. Rien n'y est re-réglé : hyperparamètres, poids de l'hybride et prior de
+cold start sont repris de l'évaluation.
+
+Une exception assumée : le modèle de ranking est servi tel qu'évalué au Sprint 5. Le réentraîner
+sur des labels plus récents le rendrait sans doute meilleur, mais il ne resterait plus aucune
+donnée pour le mesurer.
+
+### API FastAPI
+
+```bash
+uvicorn api.main:app --port 8000
+```
+
+Documentation interactive (Swagger) : <http://localhost:8000/docs>. Les modèles sont chargés une
+seule fois au démarrage (environ 1,5 Go en mémoire), jamais réentraînés par une requête.
+
+| Route | Rôle |
+|---|---|
+| `GET /health` | État du service et présence de chaque artefact |
+| `GET /movies` | Catalogue paginé, filtrable par titre et par genre |
+| `GET /movies/{movie_id}` | Détail d'un film |
+| `GET /recommendations/{user_id}` | Top-k personnalisé, avec explications ; `strategy` et `diversity` réglables |
+| `POST /recommendations/cold-start` | Recommandations pour un visiteur à partir de quelques notes |
+| `GET /similar-movies/{movie_id}` | Films proches, par embeddings, TF-IDF ou comportement |
+| `POST /predict-rating` | Note estimée, avec la base de l'estimation |
+| `GET /users/{user_id}/history` | Historique et genres préférés d'un utilisateur |
+| `GET /stats`, `GET /metrics`, `GET /model-info` | Données du dashboard : statistiques, scores mesurés, modèles en service |
+
+Exemple de réponse de `GET /recommendations/294?k=1`, mesurée sur l'API réelle :
+
+```json
+{
+  "user_id": 294, "known_user": true, "strategy": "ranker", "n_ratings": 309,
+  "items": [{
+    "rank": 1,
+    "movie": {"movie_id": 3949, "title": "Requiem for a Dream (2000)", "genres": ["Drama"]},
+    "contributions": {"als_implicit": 0.507, "item_knn": 0.246, "tfidf": 0.246},
+    "reasons": [
+      "Recommandé surtout par les goûts d'utilisateurs proches",
+      "Parce que vous avez aimé : Donnie Darko (2001) ; Eyes Wide Shut (1999)"
+    ]
+  }]
+}
+```
+
+Comportements choisis pour les cas difficiles :
+
+- **utilisateur inconnu** : `200` avec les films les plus appréciés et `known_user: false`,
+  plutôt qu'une erreur, pour qu'un front puisse toujours afficher quelque chose ;
+- **film inconnu** : `404` avec un message explicite ;
+- **paramètre invalide** (k hors bornes, note qui n'est pas un multiple de 0,5, film noté deux
+  fois…) : `422`, validé par Pydantic avant tout calcul ;
+- **modèles absents** : l'API démarre quand même ; `/health` dit ce qui manque et les autres
+  routes répondent `503` en indiquant la commande à lancer.
+
+Temps de réponse mesurés sur la machine de développement, modèles chargés : 100 ms pour un
+top-10 personnalisé avec le ranker (explications comprises), 25 ms pour des films similaires,
+18 ms pour un utilisateur inconnu.
+
+### Dashboard Streamlit
+
+```bash
+streamlit run dashboard/app.py
+```
+
+Le dashboard n'accède **qu'à l'API** (adresse réglable par la variable `RECSYS_API_URL`) : aucune
+donnée n'est lue sur le disque ni simulée. Si l'API est arrêtée, chaque page l'indique et
+rappelle la commande pour la lancer.
+
+| Page | Contenu |
+|---|---|
+| Home | Chiffres clés, recherche de films, films populaires, recommandations d'un utilisateur |
+| Personalized Recommendations | Historique, genres préférés, top 10 ou 20 avec raison et part de chaque modèle ; choix du modèle et du niveau de diversité ; onglet « nouveau visiteur » qui recommande à partir de quelques notes |
+| Similar Movies | Trois moteurs de similarité, scores, comparaison des genres |
+| Model Performance | Comparaison des 14 modèles mesurés, Precision, Recall, F1, MAP, NDCG et couverture à K = 5, 10, 20, RMSE et MAE |
+| Data Insights | Volumes, répartition des notes, genres, activité des utilisateurs, films les plus notés |
+
+![Accueil du dashboard](docs/images/dashboard-home.jpg)
+
+![Recommandations personnalisées et leur explication](docs/images/dashboard-recommendations.jpg)
+
+![Profil de l'utilisateur](docs/images/dashboard-user-profile.jpg)
+
+![Films similaires](docs/images/dashboard-similar-movies.jpg)
+
+![Comparaison des modèles](docs/images/dashboard-model-performance.jpg)
+
+![Données](docs/images/dashboard-data-insights.jpg)
+
+MovieLens ne fournit pas d'affiches : les films sont présentés par des cartes typographiques,
+colorées selon leur genre principal.
+
+### Limites de ce sprint
+
+- Les captures ont été prises dans le navigateur intégré de l'environnement de développement,
+  en résolution réduite.
+- Les contributions affichées décrivent le score de l'hybride, qui génère les candidats ; le
+  ranker les réordonne ensuite selon des critères (âge du film, note moyenne…) qui ne sont pas
+  encore détaillés dans l'interface.
+- Un seul processus sert les requêtes, avec un verrou autour des calculs : suffisant pour une
+  démonstration, pas pour de la charge.
+- Les modèles de production sont réentraînés à la main ; l'automatisation et le suivi des
+  versions relèvent du Sprint 7 (MLflow).
+
 ## Installation
 
 Prérequis : Python 3.11, environ 2 Go d'espace disque pour les données.
@@ -666,10 +787,27 @@ Régénère les quatre rapports (`collaborative_report.md`, `content_report.md`,
 `hybrid_report.md`, `ranking_report.md`) à partir des résultats.
 
 ```bash
+python scripts/train_production.py
+```
+
+Réentraîne tous les modèles sur l'ensemble des données et écrit le bundle de service dans
+`artifacts/production/` (environ 15 minutes). Prérequis : les quatre expériences.
+
+```bash
+uvicorn api.main:app --port 8000
+```
+
+```bash
+streamlit run dashboard/app.py
+```
+
+À lancer dans deux terminaux séparés, depuis la racine du dépôt.
+
+```bash
 jupyter lab notebooks
 ```
 
-Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make train-hybrid`, `make train-ranking`, `make test`, `make lint`.
+Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make train-hybrid`, `make train-ranking`, `make train-production`, `make api`, `make dashboard`, `make test`, `make lint`.
 
 ## Tests
 
@@ -681,7 +819,7 @@ python -m pytest
 python -m ruff check .
 ```
 
-Les 158 tests tournent en une trentaine de secondes sur des jeux miniatures, sans avoir besoin
+Les 205 tests tournent en une quarantaine de secondes sur des jeux miniatures, sans avoir besoin
 du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
 
 - **données** : configuration, téléchargement (somme de contrôle, archive corrompue, refus d'une
@@ -712,7 +850,13 @@ du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
   ne sert de label d'entraînement ;
 - **expériences** : exécution de bout en bout des quatre expériences enchaînées sur un
   mini-projet synthétique, et vérification que l'hyperparamètre retenu est bien celui de la
-  validation.
+  validation ;
+- **API** : toute la chaîne est rejouée sur le mini-projet (expériences, entraînement de
+  production, chargement du bundle), puis chaque route est appelée par HTTP : réponses
+  attendues, recommandations qui suivent les goûts, films déjà vus jamais recommandés,
+  utilisateur et film inconnus, paramètres invalides, démarrage en mode dégradé sans modèles ;
+- **dashboard** : le client HTTP et les cinq pages Streamlit sont exécutés contre la vraie
+  application de test, avec un message clair si l'API est injoignable.
 
 Un test de non-régression mérite d'être signalé : avec le type de chaîne produit par le
 nettoyage (`string[pyarrow]`), les tags disparaissaient silencieusement des textes envoyés au
@@ -730,7 +874,6 @@ chaîne.
 
 ## Limites actuelles
 
-- Pas encore d'API ni de dashboard.
 - MovieLens ne fournit ni description de film ni données de visionnage : les « habitudes de
   visionnage » se limiteront aux notes et à leur horodatage.
 - Les notes s'arrêtent en 2019 et proviennent d'utilisateurs ayant noté au moins 20 films :
