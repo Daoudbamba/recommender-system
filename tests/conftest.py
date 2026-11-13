@@ -66,8 +66,7 @@ def raw_dir(tmp_path: Path, raw_tables: dict[str, pd.DataFrame]) -> Path:
     return folder
 
 
-@pytest.fixture
-def config(tmp_path: Path) -> Config:
+def make_config(tmp_path: Path) -> Config:
     """Configuration pointant vers un dossier temporaire, seuils adaptes au mini-jeu."""
     return Config.model_validate(
         {
@@ -95,7 +94,16 @@ def fake_encoder(texts):
 
 
 @pytest.fixture
+def config(tmp_path: Path) -> Config:
+    return make_config(tmp_path)
+
+
+@pytest.fixture
 def synthetic_project(config: Config) -> Config:
+    return build_synthetic_project(config)
+
+
+def build_synthetic_project(config: Config) -> Config:
     """Mini-projet complet : deux genres, des gouts qui suivent le genre, des arrivees tardives.
 
     Ecrit ratings / movies / tags dans le dossier temporaire et regle la configuration pour
@@ -164,3 +172,29 @@ def synthetic_project(config: Config) -> Config:
     config.ranking.n_candidates = 10
     config.ranking.grid = [{"max_depth": 2, "n_estimators": 30, "min_child_weight": 0}]
     return config
+
+
+@pytest.fixture(scope="session")
+def trained_config(tmp_path_factory) -> Config:
+    """Mini-projet entierement entraine, bundle de production compris (une fois par session)."""
+    from recsys.experiments import collaborative, content, hybrid, ranking
+    from recsys.serving import training
+
+    config = build_synthetic_project(make_config(tmp_path_factory.mktemp("serving")))
+    collaborative.run(config)
+    content.run(config, encoder=fake_encoder)
+    hybrid.run(config, encoder=fake_encoder)
+    ranking.run(config, encoder=fake_encoder)
+    training.train_production(config, encoder=fake_encoder)
+    return config
+
+
+@pytest.fixture(scope="session")
+def client(trained_config: Config):
+    """Client HTTP de test branche sur l'application, modeles charges."""
+    from fastapi.testclient import TestClient
+
+    from api.main import create_app
+
+    with TestClient(create_app(trained_config)) as test_client:
+        yield test_client
