@@ -18,8 +18,8 @@ jobs:
     name: Qualité du code et configuration
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Outils
@@ -37,8 +37,8 @@ jobs:
     name: Tests (Pytest)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: quality
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Construction de l'image (imports vérifiés pendant la construction)
         run: docker build -t recommender-system:ci .
       - name: L'API démarre en mode dégradé sans modèles
