@@ -29,3 +29,6 @@ mlruns/
 .claude/
 .DS_Store
 Thumbs.db
+
+# Suivi des experiences (base locale MLflow)
+mlflow.db
