@@ -1,0 +1,19 @@
+# Le contexte de construction ne contient que le code du service.
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+.coverage
+**/__pycache__
+data
+artifacts
+reports
+notebooks
+docs
+mlruns
+mlflow.db
+tests
+scripts
+*.log
+.env
