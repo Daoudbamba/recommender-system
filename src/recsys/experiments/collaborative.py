@@ -13,6 +13,7 @@ from recsys.experiments.runner import (
     run_grid,
 )
 from recsys.models.collaborative import MODEL_REGISTRY
+from recsys.tracking import ExperimentTracker
 from recsys.utils.seed import set_seed
 
 RESULTS_FILE = "collaborative_results.json"
@@ -41,15 +42,29 @@ def run(
     set_seed(config.project.seed)
     folds = build_folds(load_ratings(config, sample_users), config)
     artifact_dir = config.paths.artifacts_dir / ARTIFACT_DIR
+    results_path = config.paths.reports_dir / RESULTS_FILE
+    tracker = ExperimentTracker(config, "collaborative")
+    with tracker.run(
+        "collaborative",
+        params={"seed": config.project.seed, "sample_users": sample_users,
+                "protocol": config.evaluation.model_dump()},
+    ):  # fmt: skip
+        results = _run(config, folds, artifact_dir, results_path, sample_users, models, tracker)
+        tracker.log_artifacts([results_path])
+    return results
+
+
+def _run(config, folds, artifact_dir, results_path, sample_users, models, tracker):
     results = run_grid(
         config,
         folds,
         builders={name: _builder(name) for name in config.collaborative},
         grids=config.collaborative,
-        results_path=config.paths.reports_dir / RESULTS_FILE,
+        results_path=results_path,
         artifact_dir=artifact_dir,
         extra={"sample_users": sample_users},
         models=models,
         per_user_file=PER_USER_FILE,
+        tracker=tracker,
     )
     return results

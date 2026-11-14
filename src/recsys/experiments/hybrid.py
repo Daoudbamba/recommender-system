@@ -34,6 +34,7 @@ from recsys.features.embeddings import Encoder, sentence_transformer_encoder
 from recsys.models.base import Recommender
 from recsys.models.collaborative import MODEL_REGISTRY, PopularityRecommender
 from recsys.models.hybrid import ColdStartRecommender, DiversifiedRecommender, HybridRecommender
+from recsys.tracking import ExperimentTracker
 from recsys.utils.logging import get_logger
 from recsys.utils.seed import set_seed
 
@@ -226,8 +227,12 @@ def new_item_results(
     return out
 
 
-def run(
-    config: Config, sample_users: int | None = None, encoder: Encoder | None = None
+def _run(
+    config: Config,
+    sample_users: int | None = None,
+    encoder: Encoder | None = None,
+    *,
+    tracker: ExperimentTracker,
 ) -> dict[str, Any]:
     """Execute l'experience complete et ecrit resultats et recette du meilleur hybride."""
     set_seed(config.project.seed)
@@ -252,10 +257,11 @@ def run(
     grids = {name: [{"weights": weights} for weights in cfg.weight_sets] for name in names}
     artifact_dir = config.paths.artifacts_dir / ARTIFACT_DIR
     results_path = config.paths.reports_dir / RESULTS_FILE
+    tracker.log_params({"sample_users": sample_users, "components": params, "rrf_k": cfg.rrf_k})
     results = run_grid(
         config, folds, builders, grids, results_path, artifact_dir,
         extra={"sample_users": sample_users, "components": params},
-        per_user_file=PER_USER_FILE,
+        per_user_file=PER_USER_FILE, tracker=tracker,
     )  # fmt: skip
 
     # Meilleure strategie : choisie sur la VALIDATION, jamais sur le test.
@@ -288,4 +294,20 @@ def run(
     results["cold_users"]["prior_selection"] = prior_rows
     results["new_items"] = new_item_results(test_components, test_fold, config)
     write_results(results, results_path)
+    cold = results["cold_users"]
+    tracker.log_metrics(
+        {f"cold_start_ndcg@10_n{n}": values.get("ndcg@10", 0.0)
+         for n, values in cold["models"]["cold_start"].items()}
+        | {"cold_start_prior": cold["prior_strength"]}
+    )  # fmt: skip
+    tracker.log_artifacts([results_path])
     return results
+
+
+def run(
+    config: Config, sample_users: int | None = None, encoder: Encoder | None = None
+) -> dict[str, Any]:
+    """Execute l'experience dans un run MLflow parent, ferme meme en cas d'erreur."""
+    tracker = ExperimentTracker(config, "hybrid")
+    with tracker.run("hybrid", params={"seed": config.project.seed}):
+        return _run(config=config, sample_users=sample_users, encoder=encoder, tracker=tracker)

@@ -120,3 +120,9 @@ ranking:
     - {max_depth: 4, learning_rate: 0.05}
     - {max_depth: 6, learning_rate: 0.05}
     - {max_depth: 6, learning_rate: 0.1}
+
+tracking:
+  enabled: true           # chaque experience est enregistree dans MLflow
+  uri: null               # defaut sqlite:///mlflow.db ; MLFLOW_TRACKING_URI prend le dessus
+  artifact_location: null # defaut mlruns/
+  experiment_prefix: recsys

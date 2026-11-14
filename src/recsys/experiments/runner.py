@@ -24,6 +24,7 @@ from recsys.config import Config
 from recsys.evaluation.protocol import EvaluationResult, evaluate
 from recsys.evaluation.split import Fold, build_fold, temporal_cutoffs
 from recsys.models.base import Recommender
+from recsys.tracking import ExperimentTracker
 from recsys.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -112,8 +113,12 @@ def run_grid(
     extra: dict[str, Any] | None = None,
     models: list[str] | None = None,
     per_user_file: str = "per_user.parquet",
+    tracker: ExperimentTracker | None = None,
 ) -> dict[str, Any]:
-    """Selection sur validation puis mesure sur test, pour chaque modele de la grille."""
+    """Selection sur validation puis mesure sur test, pour chaque modele de la grille.
+
+    `tracker` enregistre chaque configuration dans MLflow (un run enfant par ligne).
+    """
     results: dict[str, Any] = {
         "seed": config.project.seed,
         "protocol": config.evaluation.model_dump(),
@@ -143,6 +148,8 @@ def run_grid(
         for params in grid:
             row, _, _ = fit_and_evaluate(name, builders[name], params, folds["validation"], config)
             results["validation"].append(row)
+            if tracker:
+                tracker.log_candidate(name, "validation", row["params"], row)
             logger.info(
                 "validation | %-14s %s | %s=%.4f | fit %.0fs",
                 name, params, metric, row[metric], row["fit_seconds"],
@@ -155,6 +162,10 @@ def run_grid(
         )
         row["selected_on"] = metric
         results["test"].append(row)
+        if tracker:
+            tracker.log_candidate(
+                name, "test", row["params"], row, selected=True, tags={"selected_on": metric}
+            )
         per_user.append(per_user_frame(name, folds["test"], ranking))
         model.save(artifact_dir / f"{name}.pkl")
         logger.info(

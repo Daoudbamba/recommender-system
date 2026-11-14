@@ -38,6 +38,7 @@ from recsys.features.ranking import (
 )
 from recsys.models.hybrid import HybridRecommender
 from recsys.models.ranking import RankingRecommender, group_ids, train_ranker
+from recsys.tracking import ExperimentTracker
 from recsys.utils.logging import get_logger
 from recsys.utils.seed import set_seed
 
@@ -117,8 +118,12 @@ def make_builder(
     ).fit(fold.matrix)  # fmt: skip
 
 
-def run(
-    config: Config, sample_users: int | None = None, encoder: Encoder | None = None
+def _run(
+    config: Config,
+    sample_users: int | None = None,
+    encoder: Encoder | None = None,
+    *,
+    tracker: ExperimentTracker,
 ) -> dict[str, Any]:
     """Execute l'experience complete et ecrit resultats et modele."""
     set_seed(config.project.seed)
@@ -199,6 +204,16 @@ def run(
     results["dev_reference"] = top_k_metrics(hybrid_dev, dev_items, dev_users, relevance, 10)
     logger.info("dev | ordre de l'hybride | %s", results["dev_reference"])
 
+    tracker.log_params(
+        {"sample_users": sample_users, "n_candidates": cfg.n_candidates, "hybrid": recipe}
+    )
+    tracker.log_metrics(
+        {
+            "candidate_recall_dev": results["dataset"]["candidate_recall_dev"],
+            **{f"dev_hybrid_{k}": v for k, v in results["dev_reference"].items()},
+        }
+    )
+
     best: dict[str, Any] | None = None
     for scheme in cfg.label_schemes:
         fit_y, dev_y = (part.ravel() for part in labels[scheme])
@@ -216,6 +231,7 @@ def run(
                 **top_k_metrics(scores, dev_items, dev_users, relevance, 10),
             }
             results["validation"].append(row)
+            tracker.log_candidate("xgb_ranker", "validation", row["params"], row)
             logger.info(
                 "dev | %-7s %s | ndcg@10=%.4f (%d arbres)",
                 scheme, grid_params, row["ndcg@10"], model.best_iteration + 1,
@@ -254,6 +270,10 @@ def run(
         results["test"].append(
             {"model": name, "params": recommender.params, "fit_seconds": seconds, **summary}
         )
+        tracker.log_candidate(
+            name, "test", recommender.params, results["test"][-1],
+            selected=columns is None, tags={"selected_on": "ndcg@10 (dev)"},
+        )  # fmt: skip
         per_user.append(per_user_frame(name, test_fold, ranking))
         logger.info(
             "TEST | %-24s | ndcg@10=%.4f recall@10=%.4f coverage@10=%.3f",
@@ -272,4 +292,15 @@ def run(
     artifact_dir.mkdir(parents=True, exist_ok=True)
     pd.concat(per_user, ignore_index=True).to_parquet(artifact_dir / PER_USER_FILE)
     write_results(results, config.paths.reports_dir / RESULTS_FILE)
+    tracker.log_dict(results["feature_importance"], "feature_importance.json")
+    tracker.log_artifacts([config.paths.reports_dir / RESULTS_FILE])
     return results
+
+
+def run(
+    config: Config, sample_users: int | None = None, encoder: Encoder | None = None
+) -> dict[str, Any]:
+    """Execute l'experience dans un run MLflow parent, ferme meme en cas d'erreur."""
+    tracker = ExperimentTracker(config, "ranking")
+    with tracker.run("ranking", params={"seed": config.project.seed}):
+        return _run(config=config, sample_users=sample_users, encoder=encoder, tracker=tracker)
