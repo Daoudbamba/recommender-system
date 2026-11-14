@@ -4,10 +4,46 @@ Système de recommandation de films pour une plateforme de streaming fictive, co
 MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle hybride et
 *learning to rank*, exposés par une API et un dashboard.
 
-> **État d'avancement : Sprints 1 à 6 terminés (données, filtrage collaboratif, contenu et
-> embeddings, système hybride, learning to rank, API et dashboard).** Les sections marquées *à venir* décrivent ce qui est prévu, pas ce qui existe.
+[![CI](https://github.com/Daoudbamba/recommender-system/actions/workflows/ci.yml/badge.svg)](https://github.com/Daoudbamba/recommender-system/actions/workflows/ci.yml)
+
 > Tous les scores publiés ici sortent des fichiers `reports/*_results.json`, écrits par les
-> expériences réellement exécutées.
+> expériences réellement exécutées. Aucun chiffre n'est saisi à la main.
+
+## En bref
+
+- **25 millions de notes** (MovieLens 25M), nettoyées et analysées.
+- **14 modèles comparés** sur le même protocole, sans fuite de données : séparation
+  temporelle, réglage sur une période de validation, mesure unique sur le futur.
+- **Meilleur modèle** : un ranking XGBoost qui réordonne les candidats d'un système hybride.
+  NDCG@10 de 0,208, soit 2,6 fois la popularité et 36 % de mieux que l'hybride.
+- **Cas réels traités** : nouvel utilisateur, film sans notes, diversité des listes, biais de
+  popularité, explication de chaque recommandation.
+- **Industrialisé** : API FastAPI, dashboard Streamlit, suivi MLflow, Docker Compose,
+  212 tests et intégration continue GitHub Actions.
+
+| Modèle | NDCG@10 | Recall@10 | Couverture@10 |
+|---|---|---|---|
+| Popularité (référence) | 0,079 | 0,032 | 1,9 % |
+| Item-kNN (collaboratif) | 0,103 | 0,041 | 24,4 % |
+| Contenu TF-IDF | 0,111 | 0,053 | 20,9 % |
+| ALS implicite (collaboratif) | 0,138 | 0,060 | 12,6 % |
+| Hybride (agrégation de rangs) | 0,153 | 0,067 | 15,8 % |
+| **Ranking XGBoost** | **0,208** | **0,101** | 12,0 % |
+
+![Recommandations personnalisées et leur explication](docs/images/dashboard-recommendations.jpg)
+
+## Objectifs
+
+1. Recommander à chaque utilisateur des films qu'il aimera, à partir de ses notes, des goûts
+   d'utilisateurs proches et du contenu des films.
+2. Comparer objectivement plusieurs familles d'approches, avec des métriques de classement et
+   de prédiction de note, sur un protocole qui imite la production.
+3. Traiter les situations difficiles d'une vraie plateforme : cold start, diversité, popularité,
+   identifiants inconnus.
+4. Livrer un système utilisable et reproductible : API, interface, suivi des expériences,
+   conteneurs, tests automatisés.
+
+## Avancement
 
 | Sprint | Contenu | État |
 |---|---|---|
@@ -17,7 +53,7 @@ MovieLens 25M : filtrage collaboratif, filtrage par contenu, embeddings, modèle
 | 4 | Système hybride, cold start, diversité | ✅ fait |
 | 5 | Learning to rank (XGBoost) | ✅ fait |
 | 6 | API FastAPI et dashboard Streamlit | ✅ fait |
-| 7 | MLflow, Docker, CI, documentation finale | à venir |
+| 7 | MLflow, Docker, CI, documentation finale | ✅ fait |
 
 ## Problématique
 
@@ -72,8 +108,10 @@ flowchart LR
         BU --> J[API FastAPI]
         J --> K[Dashboard Streamlit]
     end
-    subgraph S7["Sprint 7 — à venir"]
-        BU --> I[(MLflow, Docker, CI)]
+    subgraph S7["Sprint 7 — en place"]
+        V --> ML[(MLflow :<br/>paramètres, métriques,<br/>résultats)]
+        J --> DC[Docker Compose :<br/>API, dashboard, MLflow]
+        K --> DC
     end
 ```
 
@@ -83,11 +121,13 @@ endroit, et cet endroit est testé.
 
 ```
 recommender-system/
+├── .github/workflows/ci.yml   intégration continue : lint, tests, image Docker
 ├── api/                       API FastAPI : routes, schémas Pydantic, service métier
 ├── configs/config.yaml        configuration centrale (dataset, chemins, seuils, graine)
 ├── dashboard/                 dashboard Streamlit : 5 pages, client HTTP de l'API, thème
 ├── data/                      raw / processed / features — jamais versionné
-├── docs/                      provenance du dataset, captures du dashboard
+├── docs/                      provenance du dataset, démonstration, captures
+├── Dockerfile, docker-compose.yml   image de service et stack locale
 ├── notebooks/                 01 à 08 : exploration, prétraitement, features, collaboratif, contenu, embeddings, hybride, ranking
 ├── reports/                   rapports générés (données, modèles) + figures + résultats JSON
 ├── scripts/                   points d'entrée en ligne de commande
@@ -101,14 +141,14 @@ recommender-system/
 │   ├── models/                contrat commun, collaboratif, contenu, hybride, cold start, ranking
 │   ├── experiments/           entraînement, sélection sur validation, mesure sur test
 │   ├── serving/               entraînement de production, chargement unique des modèles
+│   ├── tracking.py            suivi des expériences dans MLflow
 │   └── utils/                 journalisation, graines aléatoires
-└── tests/                     205 tests Pytest
+└── tests/                     212 tests Pytest
 ```
 
 ## Technologies
 
-Seules les bibliothèques réellement utilisées par le code existant sont installées ; les autres
-arriveront avec le sprint qui en a besoin.
+Chaque outil a été ajouté par le sprint qui en avait besoin, et seulement s'il servait.
 
 | Outil | Rôle |
 |---|---|
@@ -125,6 +165,9 @@ arriveront avec le sprint qui en a besoin.
 | Streamlit, Plotly | Dashboard interactif |
 | httpx | Client HTTP du dashboard vers l'API |
 | Matplotlib | Figures des rapports et des notebooks |
+| MLflow | Suivi des expériences : paramètres, métriques, artefacts |
+| Docker, Docker Compose | Image de service et lancement de la stack complète |
+| GitHub Actions | Intégration continue |
 | Pytest, Ruff | Tests et qualité du code |
 | Jupyter | Notebooks d'exploration |
 
@@ -707,9 +750,99 @@ colorées selon leur genre principal.
 - Les modèles de production sont réentraînés à la main ; l'automatisation et le suivi des
   versions relèvent du Sprint 7 (MLflow).
 
+## Suivi des expériences, Docker et CI (Sprint 7)
+
+### MLflow
+
+Chaque expérience est enregistrée dans MLflow : un run parent par lancement (graine, protocole,
+fichier de résultats en artefact) et un run enfant par configuration évaluée (hyperparamètres,
+toutes les métriques, jeu de validation ou de test, configuration retenue ou non).
+
+![Runs de l'expérience de ranking dans MLflow](docs/images/mlflow-ranking-runs.jpg)
+
+- **Stockage** : base SQLite `mlflow.db` et artefacts dans `mlruns/`, à la racine. MLflow 3
+  n'accepte plus le stockage sur simples fichiers. La variable `MLFLOW_TRACKING_URI` redirige
+  les runs, par exemple vers le serveur de la stack Docker (`http://localhost:5000`).
+- **Historique** : les expériences des sprints 2 à 5 ont été exécutées avant l'ajout de MLflow.
+  Plutôt que de les relancer (environ deux heures), `scripts/import_results_to_mlflow.py`
+  rejoue leurs fichiers de résultats à l'identique ; ces runs portent le tag `source=import`.
+  L'entraînement de production, lui, a été enregistré en direct.
+- **Meilleur modèle** : `scripts/best_experiment.py` interroge MLflow et classe les modèles selon
+  un critère explicite, par défaut le NDCG@10 sur le test des configurations retenues.
+
+```bash
+python scripts/best_experiment.py
+```
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+**Retrouver une expérience et son modèle** : dans l'interface, ouvrir l'expérience
+(`recsys-collaborative`, `recsys-content`, `recsys-hybrid`, `recsys-ranking` ou
+`recsys-production`), déplier le run parent, trier par `ndcg_at_10`. Le run retenu porte
+`selected = true` ; ses paramètres permettent de le réentraîner à l'identique, et le run
+`recsys-production` indique le dossier du bundle servi ainsi que son manifeste.
+
+### Workflow de réentraînement
+
+```bash
+python scripts/retrain.py
+```
+
+Rejoue toute la chaîne dans l'ordre (téléchargement, nettoyage, quatre expériences, production,
+rapports) avec la graine et la configuration de `configs/config.yaml`, chaque étape enregistrée
+dans MLflow. `--from`, `--until` et `--only` sélectionnent des étapes, `--sample-users` fait un
+essai rapide. L'étape de production a été rejouée ainsi en 5,6 minutes.
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+| Service | Adresse | Rôle |
+|---|---|---|
+| `api` | <http://localhost:8000/docs> | modèles chargés depuis `artifacts/production`, monté en lecture seule |
+| `dashboard` | <http://localhost:8501> | démarre quand l'API est prête (contrôle de santé) |
+| `mlflow` | <http://localhost:5000> | serveur de suivi, base et artefacts dans un volume Docker |
+
+- **Une seule image** pour l'API et le dashboard, avec les seules dépendances de service
+  (`requirements-serving.txt` : ni PyTorch, ni MLflow, ni Jupyter). La construction échoue si
+  un module du service ne s'importe pas.
+- **Ni données ni modèles dans l'image** : la licence MovieLens interdit la redistribution ;
+  le bundle est monté au lancement.
+- **Mémoire** : l'API occupe 1,5 Go une fois les modèles chargés. Le serveur MLflow est lancé
+  sans ses tâches de fond (évaluation de modèles génératifs), qui demandaient plus de 1,5 Go
+  pour une fonction inutile ici.
+- **PostgreSQL n'est pas utilisé** : rien dans le projet n'écrit de données en continu. Les
+  données sont figées (Parquet), les modèles sont des fichiers, et SQLite suffit au suivi des
+  expériences. Une base serait à introduire avec des retours utilisateurs en temps réel.
+
+La stack a été lancée et vérifiée sur la machine de développement : contrôle de santé de l'API
+au vert, recommandations en 230 ms, dashboard et MLflow accessibles, historique importé dans le
+serveur MLflow.
+
+### Intégration continue
+
+`.github/workflows/ci.yml`, à chaque push sur `main` et à chaque pull request :
+
+| Job | Vérifications |
+|---|---|
+| Qualité du code et configuration | Ruff (lint et formatage), chargement de `configs/config.yaml`, validité de `docker-compose.yml` |
+| Tests (Pytest) | les 212 tests, avec couverture, PyTorch en version CPU |
+| Image Docker | construction de l'image, puis démarrage de l'API sans modèles : elle doit répondre `degraded` sur `/health` et `503` ailleurs |
+
+### Démonstration
+
+[docs/DEMO.md](docs/DEMO.md) déroule une démonstration de quatre minutes, page par page, avec
+les chiffres à citer.
+
 ## Installation
 
-Prérequis : Python 3.11, environ 2 Go d'espace disque pour les données.
+Prérequis : Python 3.11, environ 7 Go d'espace disque (données, caches et modèles), 16 Go de
+mémoire pour les expériences complètes. Pour la seule stack Docker : Docker Desktop et le
+bundle `artifacts/production`.
 
 ```bash
 python -m venv .venv
@@ -720,8 +853,11 @@ python -m venv .venv
 ```
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.txt --extra-index-url https://download.pytorch.org/whl/cpu
 ```
+
+L'index supplémentaire installe PyTorch en version CPU sous Linux (sous Windows, c'est déjà la
+version par défaut).
 
 ```bash
 pip install --no-deps -e .
@@ -801,13 +937,14 @@ uvicorn api.main:app --port 8000
 streamlit run dashboard/app.py
 ```
 
-À lancer dans deux terminaux séparés, depuis la racine du dépôt.
+À lancer dans deux terminaux séparés, depuis la racine du dépôt, ou en une commande avec
+`docker compose up --build`.
 
 ```bash
 jupyter lab notebooks
 ```
 
-Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make train-hybrid`, `make train-ranking`, `make train-production`, `make api`, `make dashboard`, `make test`, `make lint`.
+Avec `make` (Linux, macOS, CI) : `make install`, `make all`, `make train`, `make train-content`, `make train-hybrid`, `make train-ranking`, `make train-production`, `make api`, `make dashboard`, `make retrain`, `make docker`, `make test`, `make lint`.
 
 ## Tests
 
@@ -819,7 +956,7 @@ python -m pytest
 python -m ruff check .
 ```
 
-Les 205 tests tournent en une quarantaine de secondes sur des jeux miniatures, sans avoir besoin
+Les 212 tests tournent en un peu plus d'une minute sur des jeux miniatures, sans avoir besoin
 du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
 
 - **données** : configuration, téléchargement (somme de contrôle, archive corrompue, refus d'une
@@ -856,7 +993,10 @@ du dataset réel ni de télécharger le modèle d'embeddings. Ils couvrent :
   attendues, recommandations qui suivent les goûts, films déjà vus jamais recommandés,
   utilisateur et film inconnus, paramètres invalides, démarrage en mode dégradé sans modèles ;
 - **dashboard** : le client HTTP et les cinq pages Streamlit sont exécutés contre la vraie
-  application de test, avec un message clair si l'API est injoignable.
+  application de test, avec un message clair si l'API est injoignable ;
+- **suivi MLflow** : chaque configuration devient un run enfant avec les bonnes métriques, un
+  échec ferme proprement le run, l'import des résultats et la recherche du meilleur modèle
+  fonctionnent sur une base de test.
 
 Un test de non-régression mérite d'être signalé : avec le type de chaîne produit par le
 nettoyage (`string[pyarrow]`), les tags disparaissaient silencieusement des textes envoyés au
@@ -866,22 +1006,48 @@ chaîne.
 
 ## Reproductibilité
 
-- Versions figées dans `requirements.txt` (exécution) et `requirements-dev.txt` (environnement
-  complet), produites par `pip freeze` après installation et exécution réelles.
+- Versions figées dans `requirements.txt` (exécution), `requirements-serving.txt` (images
+  Docker) et `requirements-dev.txt` (environnement complet), produites par `pip freeze` après
+  installation et exécution réelles.
+- Chaque expérience enregistrée dans MLflow avec ses paramètres et ses résultats.
+- Chaîne complète rejouable par `python scripts/retrain.py`.
 - Archive vérifiée par somme MD5 avant extraction.
 - Graine aléatoire unique dans `configs/config.yaml`, appliquée par `recsys.utils.seed.set_seed`.
 - Le rapport et les notebooks sont régénérables par une commande.
 
-## Limites actuelles
+## Limites du projet
 
-- MovieLens ne fournit ni description de film ni données de visionnage : les « habitudes de
-  visionnage » se limiteront aux notes et à leur horodatage.
-- Les notes s'arrêtent en 2019 et proviennent d'utilisateurs ayant noté au moins 20 films :
-  le dataset ne contient pas de vrais utilisateurs débutants, il faudra les simuler pour
-  évaluer le cold start.
-- Les fichiers *tag genome* de l'archive ne sont pas exploités : ils décrivent les films avec
-  des scores calculés par GroupLens à partir de données que ce projet ne sait pas dater.
-- La CI GitHub Actions et Docker sont prévus au Sprint 7.
+- **Données** : MovieLens ne fournit ni description de film ni données de visionnage ; les
+  « habitudes de visionnage » se limitent aux notes et à leur horodatage. Les notes s'arrêtent
+  en 2019, et tous les utilisateurs ont fini par noter au moins 20 films : le cold start est
+  simulé sur eux, pas mesuré sur de vrais visiteurs d'un soir.
+- **Évaluation hors ligne** : un film recommandé mais jamais noté compte comme une erreur, donc
+  les scores sont des bornes basses. Un seul découpage temporel et une seule graine : pas
+  d'intervalle de confiance sur les écarts entre modèles.
+- **Ranking** : il ne peut réordonner que les 100 candidats de l'hybride, qui contiennent 32 %
+  des films aimés. Son avantage tient pour moitié à la récence, propre à l'usage de MovieLens.
+- **Grilles d'hyperparamètres** volontairement petites, par manque de temps de calcul.
+- **Service** : un seul processus, adapté à une démonstration, pas à la charge. Les modèles
+  occupent 1,5 Go en mémoire.
+- Les fichiers *tag genome* ne sont pas exploités : leurs scores ne sont pas datés, donc
+  incompatibles avec une évaluation sans fuite.
+
+## Améliorations possibles
+
+- **Plus de candidats** : générer les candidats avec plusieurs modèles (ALS, contenu, récence)
+  pour relever le plafond de rappel du ranker.
+- **Évaluation plus solide** : plusieurs coupures temporelles glissantes et des intervalles de
+  confiance par bootstrap sur les utilisateurs.
+- **Embeddings du domaine** : affiner un modèle de phrases sur les tags et les co-notations de
+  films, au lieu d'un modèle généraliste.
+- **Diversité dans le ranking** : appliquer le re-classement MMR en sortie du ranker, ou
+  intégrer une variable de nouveauté.
+- **Retours en ligne** : enregistrer les clics, ce qui justifierait une base PostgreSQL et
+  permettrait un test A/B.
+- **Service** : index de voisins approché (FAISS) au-delà du million de films, plusieurs
+  processus derrière un équilibreur, réentraînement planifié.
+- **Registre de modèles** : publier chaque bundle dans le registre MLflow pour versionner les
+  modèles servis.
 
 ## Données et licence
 

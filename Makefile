@@ -2,10 +2,10 @@
 # les commandes indiquees (voir README, section Installation).
 PYTHON ?= python
 
-.PHONY: install data prepare report train train-content train-hybrid train-ranking train-production api dashboard model-report notebooks test lint all
+.PHONY: install data prepare report train train-content train-hybrid train-ranking train-production api dashboard retrain docker model-report notebooks test lint all
 
 install:
-	$(PYTHON) -m pip install -r requirements-dev.txt
+	$(PYTHON) -m pip install -r requirements-dev.txt --extra-index-url https://download.pytorch.org/whl/cpu
 	$(PYTHON) -m pip install --no-deps -e .
 
 data:
@@ -37,6 +37,12 @@ api:
 
 dashboard:
 	$(PYTHON) -m streamlit run dashboard/app.py
+
+retrain:
+	$(PYTHON) scripts/retrain.py
+
+docker:
+	docker compose up --build
 
 model-report:
 	$(PYTHON) scripts/build_model_report.py
