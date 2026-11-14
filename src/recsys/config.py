@@ -121,6 +121,15 @@ class RankingConfig(BaseModel):
     grid: list[dict[str, Any]] = [{"max_depth": 6}]
 
 
+class TrackingConfig(BaseModel):
+    """Suivi MLflow : desactive par defaut, active dans configs/config.yaml."""
+
+    enabled: bool = False
+    uri: str | None = None  # defaut : sqlite:///mlflow.db a la racine du depot
+    artifact_location: str | None = None  # defaut : mlruns/ a la racine du depot
+    experiment_prefix: str = "recsys"
+
+
 class Config(BaseModel):
     project: ProjectConfig = ProjectConfig()
     dataset: DatasetConfig
@@ -133,6 +142,7 @@ class Config(BaseModel):
     content: ContentConfig = ContentConfig()
     hybrid: HybridConfig = HybridConfig()
     ranking: RankingConfig = RankingConfig()
+    tracking: TrackingConfig = TrackingConfig()
 
     @property
     def raw_dataset_dir(self) -> Path:

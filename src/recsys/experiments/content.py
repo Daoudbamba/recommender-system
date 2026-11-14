@@ -22,6 +22,7 @@ from recsys.features.embeddings import (
 from recsys.features.item_text import aggregate_tags, build_item_documents, content_coverage
 from recsys.features.tfidf import build_tfidf_features
 from recsys.models.content_based import ContentBasedRecommender, SimilarityIndex
+from recsys.tracking import ExperimentTracker
 from recsys.utils.logging import get_logger
 from recsys.utils.seed import set_seed
 
@@ -122,11 +123,13 @@ def build_catalog_index(
     return SimilarityIndex(features), documents
 
 
-def run(
+def _run(
     config: Config,
     sample_users: int | None = None,
     models: list[str] | None = None,
     encoder: Encoder | None = None,
+    *,
+    tracker: ExperimentTracker,
 ) -> dict[str, Any]:
     """Execute l'experience complete et ecrit resultats, modeles et index."""
     set_seed(config.project.seed)
@@ -145,6 +148,12 @@ def run(
         for name, fold in folds.items()
     }
     artifact_dir = config.paths.artifacts_dir / ARTIFACT_DIR
+    tracker.log_params(
+        {
+            "sample_users": sample_users,
+            "content": config.content.model_dump(exclude={"grids"}),
+        }
+    )
     results = run_grid(
         config,
         folds,
@@ -159,6 +168,7 @@ def run(
         },
         models=models,
         per_user_file=PER_USER_FILE,
+        tracker=tracker,
     )
 
     if not models or "embeddings" in models:
@@ -168,4 +178,23 @@ def run(
         logger.info(
             "Index du catalogue : %d films, dimension %d", len(index), index.vectors.shape[1]
         )
+    tracker.log_artifacts([config.paths.reports_dir / RESULTS_FILE])
     return results
+
+
+def run(
+    config: Config,
+    sample_users: int | None = None,
+    models: list[str] | None = None,
+    encoder: Encoder | None = None,
+) -> dict[str, Any]:
+    """Execute l'experience dans un run MLflow parent, ferme meme en cas d'erreur."""
+    tracker = ExperimentTracker(config, "content")
+    with tracker.run("content", params={"seed": config.project.seed}):
+        return _run(
+            config=config,
+            sample_users=sample_users,
+            models=models,
+            encoder=encoder,
+            tracker=tracker,
+        )

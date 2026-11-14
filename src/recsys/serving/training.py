@@ -29,6 +29,7 @@ from recsys.features.embeddings import Encoder, sentence_transformer_encoder
 from recsys.features.item_text import aggregate_tags, build_item_documents
 from recsys.models.base import InteractionMatrix, Recommender
 from recsys.models.collaborative import MODEL_REGISTRY, PopularityRecommender
+from recsys.tracking import ExperimentTracker
 from recsys.utils.logging import get_logger
 from recsys.utils.seed import set_seed
 
@@ -194,5 +195,8 @@ def train_production(config: Config, encoder: Encoder | None = None) -> Path:
         "rating_bounds": [config.preprocessing.rating_min, config.preprocessing.rating_max],
     }  # fmt: skip
     (bundle / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    tracker = ExperimentTracker(config, "production")
+    with tracker.run("production", params=manifest, tags={"bundle": str(bundle.resolve())}):
+        tracker.log_artifacts([bundle / MANIFEST_FILE, bundle / METRICS_FILE], folder="bundle")
     logger.info("bundle de production ecrit dans %s", bundle)
     return bundle
