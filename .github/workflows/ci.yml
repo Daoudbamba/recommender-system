@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Qualité du code et configuration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Outils
+        run: pip install ruff==0.17.4 pyyaml==6.0.3 pydantic==2.14.3
+      - name: Lint
+        run: ruff check .
+      - name: Formatage
+        run: ruff format --check .
+      - name: Configuration du projet
+        run: PYTHONPATH=src python -c "from recsys.config import load_config; c = load_config(); print(c.dataset.name, c.evaluation.ks, c.tracking.enabled)"
+      - name: Fichier docker-compose
+        run: docker compose config --quiet
+
+  tests:
+    name: Tests (Pytest)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Dépendances (PyTorch CPU)
+        run: |
+          pip install -r requirements-dev.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install --no-deps -e .
+      - name: Tests unitaires et d'intégration
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+        run: python -m pytest -q --cov=recsys --cov=api --cov=dashboard --cov-report=term
+
+  docker:
+    name: Image Docker
+    runs-on: ubuntu-24.04
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construction de l'image (imports vérifiés pendant la construction)
+        run: docker build -t recommender-system:ci .
+      - name: L'API démarre en mode dégradé sans modèles
+        run: |
+          docker run -d --name api -p 8000:8000 recommender-system:ci
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 2; done
+          curl -s http://localhost:8000/health | python3 -c "import json, sys; s = json.load(sys.stdin); assert s['status'] == 'degraded', s; print(s['status'])"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/movies)" = "503"
+          docker rm -f api
