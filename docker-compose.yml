@@ -1,0 +1,72 @@
+# Lancement local de l'ensemble :  docker compose up --build
+#
+#   api        http://localhost:8000/docs   modeles charges depuis artifacts/production
+#   dashboard  http://localhost:8501        ne parle qu'a l'API
+#   mlflow     http://localhost:5000        serveur de suivi des experiences
+#
+# Prerequis : le bundle de production (python scripts/train_production.py), monte en
+# lecture seule. Les donnees et les modeles ne sont jamais copies dans les images.
+
+name: recommender-system
+
+services:
+  api:
+    build: .
+    image: recommender-system:latest
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./artifacts/production:/app/artifacts/production:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json, urllib.request; s = json.load(urllib.request.urlopen('http://localhost:8000/health')); exit(0 if s['models_loaded'] else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 180s  # chargement des modeles : environ une minute
+    restart: unless-stopped
+
+  dashboard:
+    image: recommender-system:latest
+    command:
+      - streamlit
+      - run
+      - dashboard/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    environment:
+      RECSYS_API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.18.0
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=sqlite:////mlflow/mlflow.db
+      - --artifacts-destination=/mlflow/artifacts
+      - --serve-artifacts
+      - --allowed-hosts=localhost:5000,127.0.0.1:5000,mlflow:5000
+    environment:
+      # Les taches de fond de MLflow (evaluation de modeles generatifs) lancent une
+      # dizaine de processus et plus de 1,5 Go de memoire ; inutiles pour ce projet.
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    restart: unless-stopped
+
+volumes:
+  mlflow-data:
